@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _add_subscription(settings: Settings, instrument_id: str, email: str) -> int:
     subscription = add_subscription(
-        _booking_source(settings), _store(settings), instrument_id, email, system_clock()
+        _booking_source(settings), _store(settings), instrument_id, email, system_clock
     )
     log.info("Active subscription: %s gets the brief for %s", subscription.email, subscription.instrument_id)
     return 0
@@ -60,7 +60,7 @@ def _run_monday_job(settings: Settings) -> int:
         _store(settings),
         SmtpMailSender(settings.smtp),
         clock=system_clock,
-        mail_from=settings.mail_from,
+        from_address=settings.mail_from,
     )
     log.info("Monday job done: %d briefs sent", sent)
     return 0

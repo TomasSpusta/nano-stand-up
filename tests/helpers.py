@@ -1,4 +1,4 @@
-"""Test helpers and made-up fixtures. Never put real booking data here: the repo is public."""
+"""Test helpers and made-up fixtures. Never put real data from the booking system here: the repo is public."""
 
 from datetime import datetime
 from html.parser import HTMLParser

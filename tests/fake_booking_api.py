@@ -75,6 +75,14 @@ def guarantor_json(firstname: str, lastname: str, email: str | None) -> dict[str
     }
 
 
+SEM_ID = "equip-sem"
+
+
+def sem_json(guarantor_email: str = "hana.testova@example.org") -> dict[str, Any]:  # Any: mirrors the API's JSON.
+    """The made-up microscope most tests use."""
+    return instrument_json(SEM_ID, "TEST-SEM", "Test Electron Microscope", "Testovaci mikroskop", guarantor_json("Hana", "Testova", guarantor_email))
+
+
 def reservation_json(
     id: str,
     instrument_id: str,

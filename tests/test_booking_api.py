@@ -6,9 +6,9 @@ from nano_standup.booking_api import ApiBookingSource, BookingDataError
 from nano_standup.booking_source import InstrumentNotFound
 from nano_standup.domain import Guarantor, Week
 
-from fake_booking_api import FakeBookingApi, guarantor_json, instrument_json, recording, reservation_json
+from fake_booking_api import SEM_ID as SEM
+from fake_booking_api import FakeBookingApi, guarantor_json, instrument_json, recording, reservation_json, sem_json
 
-SEM = "equip-sem"
 LAB = "equip-lab"
 WEEK = Week(date(2026, 10, 19))
 
@@ -16,7 +16,7 @@ WEEK = Week(date(2026, 10, 19))
 @pytest.fixture
 def api() -> FakeBookingApi:
     api = FakeBookingApi()
-    api.instruments[SEM] = instrument_json(SEM, "TEST-SEM", "Test Electron Microscope", "Testovaci mikroskop", guarantor_json("Hana", "Testova", "Hana.Testova@example.org"))
+    api.instruments[SEM] = sem_json("Hana.Testova@example.org")
     api.instruments[LAB] = instrument_json(LAB, "TEST-LAB", None, "Testovaci laborator", guarantor_json("Ota", "Zkusebni", "ota.zkusebni@example.org"))
     return api
 
@@ -44,7 +44,7 @@ def test_get_instrument_refuses_an_instrument_without_a_guarantor_email(api: Fak
         ApiBookingSource(api).get_instrument("equip-x")
 
 
-def test_get_reservations_returns_the_instrument_week_with_user_project_and_plan(api: FakeBookingApi) -> None:
+def test_get_reservations_returns_the_instrument_week_with_user_project_and_experiment_plan(api: FakeBookingApi) -> None:
     api.reservations = [
         reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T11:30:00", subject="2026-123456/RG-1-01", firstname="Jana", lastname="Smyslena"),
         reservation_json("r2", LAB, "2026-10-20T09:00:00", "2026-10-20T10:00:00"),
@@ -89,13 +89,47 @@ def test_get_reservations_reads_every_page_of_50(api: FakeBookingApi) -> None:
     assert reservation.experiment_plan == "Found on page three"
 
 
-def test_get_reservations_gives_an_empty_plan_when_it_is_missing(api: FakeBookingApi) -> None:
+def test_get_reservations_gives_an_empty_experiment_plan_when_it_is_missing(api: FakeBookingApi) -> None:
     api.reservations = [
         reservation_json("no-recording", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00"),
         reservation_json("null-plan", SEM, "2026-10-21T09:00:00", "2026-10-21T10:00:00"),
     ]
     api.recordings = [recording("null-plan", "2026-10-21T09:00:00", None), recording(None, "2026-10-21T09:00:00", "No session")]
 
-    plans = {r.id: r.experiment_plan for r in ApiBookingSource(api).get_reservations(SEM, WEEK)}
+    experiment_plans = {r.id: r.experiment_plan for r in ApiBookingSource(api).get_reservations(SEM, WEEK)}
 
-    assert plans == {"no-recording": "", "null-plan": ""}
+    assert experiment_plans == {"no-recording": "", "null-plan": ""}
+
+
+def test_get_reservations_keeps_a_filled_experiment_plan_over_an_empty_one(api: FakeBookingApi) -> None:
+    api.reservations = [reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00")]
+    api.recordings = [
+        recording("r1", "2026-10-20T09:00:00", "SEM imaging of thin films"),
+        recording("r1", "2026-10-20T09:30:00", None),
+    ]
+
+    [reservation] = ApiBookingSource(api).get_reservations(SEM, WEEK)
+
+    assert reservation.experiment_plan == "SEM imaging of thin films"
+
+
+def test_get_reservations_refuses_a_time_with_a_time_zone(api: FakeBookingApi) -> None:
+    api.reservations = [reservation_json("r1", SEM, "2026-10-20T09:00:00+02:00", "2026-10-20T10:00:00+02:00")]
+
+    with pytest.raises(BookingDataError, match="r1.*time zone"):
+        ApiBookingSource(api).get_reservations(SEM, WEEK)
+
+
+def test_get_reservations_names_the_reservation_when_a_time_is_missing(api: FakeBookingApi) -> None:
+    api.reservations = [reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00")]
+    del api.reservations[0]["scheduledend"]
+
+    with pytest.raises(BookingDataError, match="r1.*scheduledend"):
+        ApiBookingSource(api).get_reservations(SEM, WEEK)
+
+
+def test_get_instrument_names_the_instrument_when_its_id_is_missing(api: FakeBookingApi) -> None:
+    del api.instruments[SEM]["id"]
+
+    with pytest.raises(BookingDataError, match=SEM):
+        ApiBookingSource(api).get_instrument(SEM)

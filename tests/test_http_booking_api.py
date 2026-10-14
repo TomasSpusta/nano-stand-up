@@ -1,11 +1,11 @@
 import pytest
 
-from nano_standup.booking_api import BookingApiError, HttpBookingApi
+from nano_standup.booking_api import BookingApiError, BookingDataError, HttpBookingApi
 
-from fake_booking_api import guarantor_json, instrument_json
+from fake_booking_api import sem_json
 from local_booking_server import API_KEY, local_booking_server
 
-SEM = instrument_json("equip-sem", "TEST-SEM", "Test Electron Microscope", "Testovaci mikroskop", guarantor_json("Hana", "Testova", "hana.testova@example.org"))
+SEM = sem_json()
 
 
 def test_logs_in_once_and_sends_list_filters_as_repeated_parameters() -> None:
@@ -48,3 +48,11 @@ def test_an_unreachable_api_names_the_request() -> None:
         api.get("/api/equipment/equip-sem", {})
 
     assert error.value.status is None
+
+
+def test_a_login_answer_without_a_token_names_the_request() -> None:
+    with local_booking_server({}, login_answer={}) as server:
+        api = HttpBookingApi(server.url, API_KEY)
+
+        with pytest.raises(BookingDataError, match="/api/login.*accessToken"):
+            api.get("/api/equipment/equip-sem", {})

@@ -23,13 +23,13 @@ def build_brief(
     built_local = built_at.astimezone(PRAGUE)
     subject = f"Brief: {instrument.alias} - week {_week_span(week)}"
     body = f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{_esc(subject)}</title></head>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{_html_text(subject)}</title></head>
 <body style="margin:0;background:#f4f4f5;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1a1a1a;line-height:1.4;">
   <div style="max-width:640px;margin:0 auto;padding:16px;">
     <div style="background:#fff;border-radius:8px;padding:20px 20px 12px;">
-      <div style="font-size:13px;color:#666;">Weekly brief for {_esc(instrument.guarantor.name)}</div>
-      <h1 style="font-size:20px;margin:4px 0 2px;">{_esc(instrument.name)}</h1>
-      <div style="color:#666;font-size:13px;">{_esc(instrument.alias)} - Monday {_day_month(week.monday)} to Sunday {_day_month(week.sunday)} {week.sunday.year}</div>
+      <div style="font-size:13px;color:#666;">Weekly brief for {_html_text(instrument.guarantor.name)}</div>
+      <h1 style="font-size:20px;margin:4px 0 2px;">{_html_text(instrument.name)}</h1>
+      <div style="color:#666;font-size:13px;">{_html_text(instrument.alias)} - Monday {_day_month(week.monday)} to Sunday {_day_month(week.sunday)} {week.sunday.year}</div>
       {_counts_html(reservations)}
       {_days_html(week, reservations)}
     </div>
@@ -49,7 +49,7 @@ def _counts_html(reservations: list[Reservation]) -> str:
     without_experiment_plan = sum(1 for r in reservations if not r.experiment_plan.strip())
     tiles = [
         (str(len(reservations)), _plural(len(reservations), "reservation")),
-        (f"{_number(hours)} h", "booked"),
+        (f"{_format_hours(hours)} h", "booked"),
         (str(users), _plural(users, "user")),
         (str(without_experiment_plan), "without an experiment plan"),
     ]
@@ -79,13 +79,13 @@ def _days_html(week: Week, reservations: list[Reservation]) -> str:
 
 def _row_html(reservation: Reservation) -> str:
     experiment_plan = reservation.experiment_plan.strip()
-    experiment_plan_html = _esc(experiment_plan) if experiment_plan else '<span style="color:#b45309;font-style:italic;">No experiment plan given</span>'
+    experiment_plan_html = _html_text(experiment_plan) if experiment_plan else '<span style="color:#b45309;font-style:italic;">No experiment plan given</span>'
     return f"""
           <tr>
             <td style="width:96px;padding:10px 12px 10px 0;vertical-align:top;white-space:nowrap;"><strong>{reservation.start:%H:%M}-{reservation.end:%H:%M}</strong></td>
             <td style="padding:10px 0;vertical-align:top;">
-              <div><strong>{_esc(reservation.user_name)}</strong></div>
-              <div style="color:#777;font-size:12px;">{_esc(reservation.project_code)}</div>
+              <div><strong>{_html_text(reservation.user_name)}</strong></div>
+              <div style="color:#777;font-size:12px;">{_html_text(reservation.project_code)}</div>
               <div style="margin-top:4px;">{experiment_plan_html}</div>
             </td>
           </tr>"""
@@ -95,7 +95,7 @@ def _plural(count: int, word: str) -> str:
     return word if count == 1 else f"{word}s"
 
 
-def _number(value: float) -> str:
+def _format_hours(value: float) -> str:
     """One decimal place, dropped when the value is whole: "6.5", "3"."""
     return f"{value:.1f}".removesuffix(".0")
 
@@ -114,5 +114,6 @@ def _day_month(day: date) -> str:
     return f"{day.day}. {day.month}."
 
 
-def _esc(text: str) -> str:
+def _html_text(text: str) -> str:
+    """Text made safe for HTML, with line breaks kept."""
     return html.escape(text).replace("\n", "<br>")

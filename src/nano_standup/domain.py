@@ -1,11 +1,20 @@
 """Domain types shared by all modules. Words follow GLOSSARY.md."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 # The booking system and the guarantors work in Prague time.
 PRAGUE = ZoneInfo("Europe/Prague")
+
+# Gives the current time with a time zone. Passed in from outside, so tests can fix the time.
+Clock = Callable[[], datetime]
+
+
+def normalize_email(email: str) -> str:
+    """Emails match without regard to case or surrounding spaces."""
+    return email.strip().lower()
 
 
 @dataclass(frozen=True)

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from nano_standup.domain import normalize_email
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS subscription (
     id INTEGER PRIMARY KEY,
@@ -22,11 +24,6 @@ CREATE TABLE IF NOT EXISTS subscription (
 class Subscription:
     instrument_id: str
     email: str
-
-
-def normalize_email(email: str) -> str:
-    """Emails match without regard to case or surrounding spaces."""
-    return email.strip().lower()
 
 
 class SubscriptionStore:

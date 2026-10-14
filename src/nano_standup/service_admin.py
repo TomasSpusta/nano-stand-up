@@ -1,9 +1,8 @@
 """Commands for the service admin."""
 
-from datetime import datetime
-
 from nano_standup.booking_source import BookingSource
-from nano_standup.subscriptions import Subscription, SubscriptionStore, normalize_email
+from nano_standup.domain import Clock, normalize_email
+from nano_standup.subscriptions import Subscription, SubscriptionStore
 
 
 class NotTheGuarantor(ValueError):
@@ -11,7 +10,7 @@ class NotTheGuarantor(ValueError):
 
 
 def add_subscription(
-    source: BookingSource, store: SubscriptionStore, instrument_id: str, email: str, now: datetime
+    source: BookingSource, store: SubscriptionStore, instrument_id: str, email: str, clock: Clock
 ) -> Subscription:
     """Add an active subscription without the confirm link.
 
@@ -22,4 +21,4 @@ def add_subscription(
         raise NotTheGuarantor(
             f"{email.strip()!r} is not the guarantor email of {instrument.label} in the booking system"
         )
-    return store.add_active(instrument.id, email, now)
+    return store.add_active(instrument.id, email, clock())

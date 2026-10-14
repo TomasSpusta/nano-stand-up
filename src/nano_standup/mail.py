@@ -8,7 +8,7 @@ from typing import Protocol
 
 @dataclass(frozen=True)
 class Message:
-    sender: str
+    from_address: str
     to: str
     subject: str
     html: str
@@ -42,7 +42,7 @@ class SmtpMailSender:
 
     def send(self, message: Message) -> None:
         email = EmailMessage()
-        email["From"] = message.sender
+        email["From"] = message.from_address
         email["To"] = message.to
         email["Subject"] = message.subject
         email.set_content(message.html, subtype="html")

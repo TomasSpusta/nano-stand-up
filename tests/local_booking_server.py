@@ -13,16 +13,20 @@ API_KEY = "test-key"
 
 
 class LocalBookingServer:
-    def __init__(self, instruments: dict[str, Any]) -> None:  # Any: mirrors the API's JSON.
+    def __init__(self, instruments: dict[str, Any], login_answer: dict[str, Any]) -> None:  # Any: mirrors the API's JSON.
         self.instruments = instruments
+        self.login_answer = login_answer
         self.logins = 0
         self.queries: list[dict[str, list[str]]] = []
         self.url = ""
 
 
 @contextmanager
-def local_booking_server(instruments: dict[str, Any]) -> Iterator[LocalBookingServer]:  # Any: mirrors the API's JSON.
-    state = LocalBookingServer(instruments)
+def local_booking_server(
+    instruments: dict[str, Any], login_answer: dict[str, Any] | None = None  # Any: mirrors the API's JSON.
+) -> Iterator[LocalBookingServer]:
+    """`login_answer` replaces the normal login answer, which holds the access token."""
+    state = LocalBookingServer(instruments, {"accessToken": TOKEN} if login_answer is None else login_answer)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: Any) -> None:  # Any: matches the base class.
@@ -40,7 +44,7 @@ def local_booking_server(instruments: dict[str, Any]) -> Iterator[LocalBookingSe
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             if self.path == "/api/login" and body == {"apiKey": API_KEY}:
                 state.logins += 1
-                self._reply(200, {"accessToken": TOKEN})
+                self._reply(200, state.login_answer)
             else:
                 self._reply(401, {"error": "Unauthorized"})
 

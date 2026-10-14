@@ -65,7 +65,7 @@ class HttpBookingApi:
                 data=json.dumps({"apiKey": self._api_key}).encode(),
                 headers={"Content-Type": "application/json"},
             )
-            self._token = str(self._send("/api/login", request)["accessToken"])
+            self._token = str(_required(self._send("/api/login", request), "accessToken", "The answer to /api/login"))
         return self._token
 
     def _send(self, path: str, request: urllib.request.Request) -> Any:  # Any: parsed JSON.
@@ -97,7 +97,7 @@ class ApiBookingSource:
         if not email:
             raise BookingDataError(f"Instrument {alias} ({instrument_id}) has no guarantor email in the booking system")
         return Instrument(
-            id=item["id"],
+            id=_required(item, "id", f"Instrument {alias} ({instrument_id})"),
             name=item.get("ge_nameen") or item.get("name") or alias,
             alias=alias,
             guarantor=Guarantor(name=_person_name(guarantor_json) or guarantor_json.get("fullname") or "", email=email),
@@ -105,7 +105,7 @@ class ApiBookingSource:
 
     def get_reservations(self, instrument_id: str, week: Week) -> list[Reservation]:
         ids = [
-            item["id"]
+            _required(item, "id", "A reservation in the list")
             for item in self._pages(
                 "/api/service-appointment",
                 _time_window("scheduledstart", week.start, week.end),
@@ -131,8 +131,10 @@ class ApiBookingSource:
         for item in self._pages("/api/recording", window, scope="ge_sessionid"):
             session = item.get("ge_sessionid") or {}
             reservation_id = (session.get("ge_serviceappointmentid") or {}).get("id")
-            if reservation_id:
-                experiment_plans[reservation_id] = item.get("new_plan_experimentu_new") or ""
+            experiment_plan = item.get("new_plan_experimentu_new") or ""
+            # A reservation can have more than one recording. An empty experiment plan never hides a filled one.
+            if reservation_id and (experiment_plan.strip() or reservation_id not in experiment_plans):
+                experiment_plans[reservation_id] = experiment_plan
         return experiment_plans
 
     def _pages(self, path: str, filters: list[str], scope: str) -> Iterator[dict[str, Any]]:  # Any: parsed JSON.
@@ -151,17 +153,39 @@ def _time_window(field: str, start: datetime, end: datetime) -> list[str]:
 
 
 def _reservation(item: dict[str, Any], experiment_plan: str) -> Reservation:  # Any: parsed JSON.
+    reservation_id = _required(item, "id", "A reservation")
+    what = f"Reservation {reservation_id}"
     contact = item.get("ge_realised_for_contactid") or {}
     name = _person_name(contact)
     return Reservation(
-        id=item["id"],
-        start=datetime.fromisoformat(item["scheduledstart"]),
-        end=datetime.fromisoformat(item["scheduledend"]),
+        id=reservation_id,
+        start=_local_time(item, "scheduledstart", what),
+        end=_local_time(item, "scheduledend", what),
         user_id=contact.get("id") or "",
         user_name=name or "Unknown user",
         project_code=(item.get("subject") or "").strip(),
         experiment_plan=experiment_plan,
     )
+
+
+def _required(item: Any, key: str, what: str) -> Any:  # Any: parsed JSON.
+    """`item[key]`, or a BookingDataError that names `what` when it is missing or empty."""
+    value = item.get(key) if isinstance(item, dict) else None
+    if value is None or value == "":
+        raise BookingDataError(f"{what} has no {key!r} in the booking API answer")
+    return value
+
+
+def _local_time(item: dict[str, Any], key: str, what: str) -> datetime:  # Any: parsed JSON.
+    """A naive Prague local time. A time zone is refused: the rest of the service could not compare it."""
+    text = str(_required(item, key, what))
+    try:
+        value = datetime.fromisoformat(text)
+    except ValueError as error:
+        raise BookingDataError(f"{what} has a {key} that is not a date and time: {text!r}") from error
+    if value.tzinfo is not None:
+        raise BookingDataError(f"{what} has a {key} with a time zone ({text!r}); the service expects Prague local time without one")
+    return value
 
 
 def _person_name(person: dict[str, Any]) -> str:  # Any: parsed JSON.

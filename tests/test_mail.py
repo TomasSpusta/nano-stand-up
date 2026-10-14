@@ -6,7 +6,7 @@ import pytest
 
 from nano_standup.mail import Message, SmtpMailSender, SmtpSettings
 
-MESSAGE = Message(sender="standup@example.org", to="hana.testova@example.org", subject="Brief: TEST-SEM", html="<p>Hi</p>")
+MESSAGE = Message(from_address="standup@example.org", to="hana.testova@example.org", subject="Brief: TEST-SEM", html="<p>Hi</p>")
 
 
 class FakeSmtp:

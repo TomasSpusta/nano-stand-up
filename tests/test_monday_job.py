@@ -33,16 +33,16 @@ def test_sends_one_brief_per_active_subscription_to_the_subscriber(tmp_path: Pat
     store = SubscriptionStore(tmp_path / "standup.sqlite3")
     store.add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
     store.add_active(OTHER.id, "ota.zkusebni@example.org", MONDAY_8AM)
-    sender = InMemoryMailSender()
+    mail_sender = InMemoryMailSender()
 
-    run_monday_job(source, store, sender, clock=lambda: MONDAY_8AM, mail_from="standup@example.org")
+    run_monday_job(source, store, mail_sender, clock=lambda: MONDAY_8AM, from_address="standup@example.org")
 
-    sent = sorted(sender.sent, key=lambda m: m.to)
+    sent = sorted(mail_sender.sent, key=lambda m: m.to)
     assert [(m.to, m.subject) for m in sent] == [
         ("hana.testova@example.org", "Brief: TEST-SEM - week 19.-25. 10. 2026"),
         ("ota.zkusebni@example.org", "Brief: TEST-LAB - week 19.-25. 10. 2026"),
     ]
-    assert all(m.sender == "standup@example.org" for m in sent)
+    assert all(m.from_address == "standup@example.org" for m in sent)
     sem_text = visible_text(sent[0].html)
     assert "Jana Smyslena" in sem_text
     assert "Karel Neexistujici" not in sem_text
@@ -51,14 +51,14 @@ def test_sends_one_brief_per_active_subscription_to_the_subscriber(tmp_path: Pat
 
 
 def test_sends_nothing_without_subscriptions(tmp_path: Path) -> None:
-    sender = InMemoryMailSender()
+    mail_sender = InMemoryMailSender()
 
     run_monday_job(
         FakeBookingSource(instruments=[INSTRUMENT]),
         SubscriptionStore(tmp_path / "standup.sqlite3"),
-        sender,
+        mail_sender,
         clock=lambda: MONDAY_8AM,
-        mail_from="standup@example.org",
+        from_address="standup@example.org",
     )
 
-    assert sender.sent == []
+    assert mail_sender.sent == []
