@@ -4,3 +4,13 @@ bookig-api-json/
 
 # Python caches
 __pycache__/
+
+# Local settings with secrets, and local data
+.env
+data/
+*.sqlite3
+
+# Python tooling
+.venv/
+.mypy_cache/
+.pytest_cache/
