@@ -26,6 +26,12 @@ class Count:
 
 
 @dataclass(frozen=True)
+class LabelledNote:
+    label: str
+    text: str
+
+
+@dataclass(frozen=True)
 class Row:
     """One reservation as the brief shows it. Empty strings are left out."""
 
@@ -43,6 +49,16 @@ class Row:
     @property
     def mark(self) -> str:
         return MARKS.get(self.status, "")
+
+    @property
+    def notes(self) -> list[LabelledNote]:
+        """The note and the private note, in that order. An empty one is left out of the brief."""
+        return [LabelledNote("Note", self.note), LabelledNote("Private note", self.private_note)]
+
+
+def time_span(start: str, end: str) -> str:
+    """"15:00 to Tue 13:00". Takes the parts, so the HTML version can keep the end day and time together."""
+    return f"{start} to {end}"
 
 
 @dataclass(frozen=True)

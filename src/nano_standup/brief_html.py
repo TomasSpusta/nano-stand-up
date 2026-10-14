@@ -15,7 +15,9 @@ from nano_standup.brief_content import (
     BriefContent,
     Count,
     Day,
+    LabelledNote,
     Row,
+    time_span,
 )
 from nano_standup.domain import ReservationStatus
 
@@ -23,9 +25,11 @@ PAGE_BACKGROUND = "#f4f4f5"
 GREY_TEXT = "#666666"
 FADED_TEXT = "#888888"
 NOTE_TEXT = "#444444"
-WARNING_TEXT = "#b45309"
-WARNING_BACKGROUND = "#fffbeb"
-DANGER_TEXT = "#b91c1c"
+AMBER_TEXT = "#b45309"
+AMBER_BACKGROUND = "#fffbeb"
+RED_TEXT = "#b91c1c"
+# A cancelled reservation's text. Its mark is not crossed out, so it stays easy to read.
+CROSSED_OUT = f"text-decoration:line-through;color:{FADED_TEXT};"
 
 
 @dataclass(frozen=True)
@@ -38,8 +42,8 @@ class _StatusStyle:
 
 STATUS_STYLES = {
     ReservationStatus.RESERVED: _StatusStyle(),
-    ReservationStatus.REQUESTED: _StatusStyle(mark_color=WARNING_TEXT, highlighted=True),
-    ReservationStatus.CANCELLED: _StatusStyle(mark_color=DANGER_TEXT, crossed_out=True),
+    ReservationStatus.REQUESTED: _StatusStyle(mark_color=AMBER_TEXT, highlighted=True),
+    ReservationStatus.CANCELLED: _StatusStyle(mark_color=RED_TEXT, crossed_out=True),
 }
 
 
@@ -77,7 +81,7 @@ def _counts_html(counts: list[Count]) -> str:
 
 def _count_html(count: Count) -> str:
     background, value_color, border = (
-        (WARNING_BACKGROUND, WARNING_TEXT, f"border:1px solid {WARNING_TEXT};")
+        (AMBER_BACKGROUND, AMBER_TEXT, f"border:1px solid {AMBER_TEXT};")
         if count.needs_action
         else (PAGE_BACKGROUND, "inherit", "")
     )
@@ -101,20 +105,18 @@ def _day_html(day: Day) -> str:
 
 def _row_html(row: Row) -> str:
     style = STATUS_STYLES[row.status]
-    # The mark itself is not crossed out, so it stays easy to read.
-    crossed = f"text-decoration:line-through;color:{FADED_TEXT};" if style.crossed_out else ""
     # A background with a coloured left edge; Outlook draws both. The white top edge keeps two highlighted rows apart.
-    highlight = f"background:{WARNING_BACKGROUND};border-top:4px solid #ffffff;"
+    highlight = f"background:{AMBER_BACKGROUND};border-top:4px solid #ffffff;"
     time_cell_highlight, text_cell_highlight = (
         (
-            f"{highlight}border-left:3px solid {WARNING_TEXT};padding-left:8px;",
+            f"{highlight}border-left:3px solid {AMBER_TEXT};padding-left:8px;",
             f"{highlight}padding-right:8px;",
         )
         if style.highlighted
         else ("", "")
     )
     # A narrow column may break the time span only after "to", never inside "Wed 13:00".
-    time_span = f"{row.start} to {row.end.replace(' ', '&nbsp;')}"
+    span = time_span(row.start, row.end.replace(" ", "&nbsp;"))
     mark = (
         f'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:{style.mark_color};">{row.mark}</div>'
         if row.mark
@@ -123,29 +125,34 @@ def _row_html(row: Row) -> str:
     experiment_plan = (
         _html_text(row.experiment_plan)
         if row.experiment_plan
-        else f'<span style="color:{WARNING_TEXT};font-style:italic;">{NO_EXPERIMENT_PLAN}</span>'
+        else f'<span style="color:{AMBER_TEXT};font-style:italic;">{NO_EXPERIMENT_PLAN}</span>'
     )
+    notes = "\n              ".join(_note_html(note) for note in row.notes)
     return f"""
           <tr>
             <td style="width:112px;padding:10px 12px 10px 0;vertical-align:top;{time_cell_highlight}">
-              <div style="font-weight:700;{crossed}">{time_span}</div>
+              {_div("font-weight:700;", span, style.crossed_out)}
               <div style="color:{GREY_TEXT};font-size:12px;">{row.length}</div>
             </td>
             <td style="padding:10px 0;vertical-align:top;{text_cell_highlight}">
-              {mark}<div style="font-weight:700;{crossed}">{_html_text(row.user_name)}</div>
-              <div style="color:{GREY_TEXT};font-size:12px;{crossed}">{_html_text(row.project_code)}</div>
-              <div style="margin-top:4px;{crossed}">{experiment_plan}</div>
-              {_labelled_html("Note", row.note)}
-              {_labelled_html("Private note", row.private_note)}
+              {mark}{_div("font-weight:700;", _html_text(row.user_name), style.crossed_out)}
+              {_div(f"color:{GREY_TEXT};font-size:12px;", _html_text(row.project_code), style.crossed_out)}
+              {_div("margin-top:4px;", experiment_plan, style.crossed_out)}
+              {notes}
             </td>
           </tr>"""
 
 
-def _labelled_html(label: str, text: str) -> str:
-    """A labelled line, or nothing when the text is empty."""
-    if not text:
+def _div(style: str, inner_html: str, crossed_out: bool) -> str:
+    """A block with the given inline style, crossed out when the reservation is cancelled."""
+    return f'<div style="{style}{CROSSED_OUT if crossed_out else ""}">{inner_html}</div>'
+
+
+def _note_html(note: LabelledNote) -> str:
+    """A labelled line, or nothing when the note is empty."""
+    if not note.text:
         return ""
-    return f'<div style="margin-top:4px;color:{NOTE_TEXT};font-size:13px;"><strong>{label}:</strong> {_html_text(text)}</div>'
+    return f'<div style="margin-top:4px;color:{NOTE_TEXT};font-size:13px;"><strong>{note.label}:</strong> {_html_text(note.text)}</div>'
 
 
 def _html_text(text: str) -> str:
