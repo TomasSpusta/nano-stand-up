@@ -1,0 +1,6 @@
+# Symlink to the booking API folder. It holds secrets (API key).
+bookig-api-json
+bookig-api-json/
+
+# Python caches
+__pycache__/
