@@ -20,7 +20,7 @@ GREY_TEXT = "#666666"
 FADED_TEXT = "#888888"
 WARNING_TEXT = "#b45309"
 DANGER_TEXT = "#b91c1c"
-MARKS = {ReservationStatus.CANCELLED: "Cancelled", ReservationStatus.TENTATIVE: "Tentative"}
+MARKS = {ReservationStatus.CANCELLED: "Cancelled", ReservationStatus.REQUESTED: "Requested"}
 
 
 @dataclass(frozen=True)

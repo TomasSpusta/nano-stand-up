@@ -26,11 +26,12 @@ log = logging.getLogger(__name__)
 Params = dict[str, str | int | list[str]]
 
 PAGE_SIZE = 50
-# Reservation (statecode, statuscode) pairs seen in the booking system: (3, 4) reserved, (0, 1) open, (2, 9) cancelled.
+# Reservation (statecode, statuscode) pairs in the booking system, which is built on Microsoft Dynamics:
+# (0, 1) requested, (3, 4) reserved, (2, 9) cancelled. Only these three were seen in real data.
+# The booking system labels them "Požadováno" (Requested) and "Rezervováno" (Reserved).
 CANCELLED_STATE = 2
 CANCELLED_STATUS = 9
-# Assumed: the service admin still has to confirm that "open" status 1 means tentative.
-TENTATIVE_STATUS = 1
+REQUESTED_STATUS = 1
 RESERVED_STATUS = 4
 # A recording starts about when its reservation does. One day of margin each side is enough to find it.
 RECORDING_MARGIN = timedelta(days=1)
@@ -184,8 +185,8 @@ def _status(item: dict[str, Any], what: str) -> ReservationStatus:  # Any: parse
     statecode, statuscode = item.get("statecode"), item.get("statuscode")
     if statecode == CANCELLED_STATE or statuscode == CANCELLED_STATUS:
         return ReservationStatus.CANCELLED
-    if statuscode == TENTATIVE_STATUS:
-        return ReservationStatus.TENTATIVE
+    if statuscode == REQUESTED_STATUS:
+        return ReservationStatus.REQUESTED
     if statuscode != RESERVED_STATUS:
         log.warning("%s has an unknown statuscode %r (statecode %r); the brief shows it as booked", what, statuscode, statecode)
     return ReservationStatus.BOOKED

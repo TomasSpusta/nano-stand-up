@@ -132,14 +132,14 @@ def test_a_cancelled_reservation_is_crossed_out_marked_and_counted_apart() -> No
     assert "line-through" in row
 
 
-def test_a_tentative_reservation_is_marked_and_still_counted() -> None:
+def test_a_requested_reservation_is_marked_and_still_counted() -> None:
     reservations = [
-        reservation("2026-10-19T09:00", "2026-10-19T12:00", user_name="Jana Smyslena", status=ReservationStatus.TENTATIVE)
+        reservation("2026-10-19T09:00", "2026-10-19T12:00", user_name="Jana Smyslena", status=ReservationStatus.REQUESTED)
     ]
 
     text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
 
-    assert "09:00 to 12:00 3 h Tentative Jana Smyslena" in text
+    assert "09:00 to 12:00 3 h Requested Jana Smyslena" in text
     assert "1 reservation " in text
     assert "0 cancelled" in text
 
@@ -258,7 +258,7 @@ def test_the_plain_text_version_shows_the_same_week() -> None:
             private_note="Paid by the group",
         ),
         reservation(
-            "2026-10-20T09:00", "2026-10-20T09:30", user_name="Karel Neexistujici", experiment_plan="", status=ReservationStatus.TENTATIVE
+            "2026-10-20T09:00", "2026-10-20T09:30", user_name="Karel Neexistujici", experiment_plan="", status=ReservationStatus.REQUESTED
         ),
         reservation("2026-10-22T09:00", "2026-10-22T10:00", user_name="Petr Vymysleny", status=ReservationStatus.CANCELLED),
     ]
@@ -276,7 +276,7 @@ MONDAY 19. 10.
   No reservations
 
 TUESDAY 20. 10.
-  [Tentative] 09:00 to 09:30 (30 min)
+  [Requested] 09:00 to 09:30 (30 min)
     Karel Neexistujici, 2026-000001/RG-1-01
     No experiment plan given
   15:00 to Wed 13:00 (22 h)

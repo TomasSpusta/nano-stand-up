@@ -39,8 +39,8 @@ class Instrument:
 
 class ReservationStatus(Enum):
     BOOKED = "booked"
-    # It may not happen.
-    TENTATIVE = "tentative"
+    # Waiting for the guarantor to approve it, so it may not happen.
+    REQUESTED = "requested"
     # The booking system keeps cancelled reservations.
     CANCELLED = "cancelled"
 

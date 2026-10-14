@@ -95,7 +95,7 @@ def reservation_json(
     note: str | None = None,
     private_note: str | None = None,
 ) -> dict[str, Any]:  # Any: mirrors the API's JSON.
-    """`status` is the booking system's statuscode: 4 reserved, 1 tentative, 9 cancelled. The statecode follows it."""
+    """`status` is the booking system's statuscode: 4 reserved, 1 requested, 9 cancelled. The statecode follows it."""
     return {
         "id": id,
         "subject": subject,

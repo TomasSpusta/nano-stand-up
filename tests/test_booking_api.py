@@ -138,7 +138,7 @@ def test_get_instrument_names_the_instrument_when_its_id_is_missing(api: FakeBoo
 def test_get_reservations_reads_status_note_and_private_note(api: FakeBookingApi) -> None:
     api.reservations = [
         reservation_json("booked", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", status=4, note=None, private_note=None),
-        reservation_json("tentative", SEM, "2026-10-21T09:00:00", "2026-10-21T10:00:00", status=1, note="Bring own holder"),
+        reservation_json("requested", SEM, "2026-10-21T09:00:00", "2026-10-21T10:00:00", status=1, note="Bring own holder"),
         reservation_json("cancelled", SEM, "2026-10-22T09:00:00", "2026-10-22T10:00:00", status=9, private_note="Paid by the group"),
     ]
 
@@ -146,11 +146,11 @@ def test_get_reservations_reads_status_note_and_private_note(api: FakeBookingApi
 
     assert {i: r.status for i, r in reservations.items()} == {
         "booked": ReservationStatus.BOOKED,
-        "tentative": ReservationStatus.TENTATIVE,
+        "requested": ReservationStatus.REQUESTED,
         "cancelled": ReservationStatus.CANCELLED,
     }
     assert (reservations["booked"].note, reservations["booked"].private_note) == ("", "")
-    assert reservations["tentative"].note == "Bring own holder"
+    assert reservations["requested"].note == "Bring own holder"
     assert reservations["cancelled"].private_note == "Paid by the group"
 
 

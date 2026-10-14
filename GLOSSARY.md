@@ -59,9 +59,10 @@ _Avoid_: Description, comment
 A note on a reservation that only staff can see.
 _Avoid_: Private description, internal note
 
-**Tentative reservation**:
-A reservation that may not happen. The booking system shows it as open (status 1).
-_Avoid_: Pending, unconfirmed
+**Requested reservation**:
+A reservation waiting for the guarantor to approve it, so it may not happen.
+The booking system calls it "Požadováno" (Requested), statuscode 1.
+_Avoid_: Tentative, pending, unconfirmed
 
 **Cancelled reservation**:
 A reservation the user cancelled. The booking system keeps it, and a brief shows it crossed out.
