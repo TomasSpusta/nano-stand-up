@@ -10,6 +10,7 @@ API quirks it hides:
 """
 
 import json
+import logging
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,11 +19,20 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from nano_standup.booking_source import InstrumentNotFound
-from nano_standup.domain import Guarantor, Instrument, Reservation, Week
+from nano_standup.domain import Guarantor, Instrument, Reservation, ReservationStatus, Week
+
+log = logging.getLogger(__name__)
 
 Params = dict[str, str | int | list[str]]
 
 PAGE_SIZE = 50
+# Reservation (statecode, statuscode) pairs in the booking system, which is built on Microsoft Dynamics:
+# (0, 1) requested, (3, 4) reserved, (2, 9) cancelled. Only these three were seen in real data.
+# The booking system labels them "Požadováno" (Requested) and "Rezervováno" (Reserved).
+CANCELLED_STATE = 2
+CANCELLED_STATUS = 9
+REQUESTED_STATUS = 1
+RESERVED_STATUS = 4
 # A recording starts about when its reservation does. One day of margin each side is enough to find it.
 RECORDING_MARGIN = timedelta(days=1)
 
@@ -165,7 +175,21 @@ def _reservation(item: dict[str, Any], experiment_plan: str) -> Reservation:  # 
         user_name=name or "Unknown user",
         project_code=(item.get("subject") or "").strip(),
         experiment_plan=experiment_plan,
+        status=_status(item, what),
+        note=item.get("description") or "",
+        private_note=item.get("ge_privatedescription") or "",
     )
+
+
+def _status(item: dict[str, Any], what: str) -> ReservationStatus:  # Any: parsed JSON.
+    statecode, statuscode = item.get("statecode"), item.get("statuscode")
+    if statecode == CANCELLED_STATE or statuscode == CANCELLED_STATUS:
+        return ReservationStatus.CANCELLED
+    if statuscode == REQUESTED_STATUS:
+        return ReservationStatus.REQUESTED
+    if statuscode != RESERVED_STATUS:
+        log.warning("%s has an unknown statuscode %r (statecode %r); the brief shows it as reserved", what, statuscode, statecode)
+    return ReservationStatus.RESERVED
 
 
 def _required(item: Any, key: str, what: str) -> Any:  # Any: parsed JSON.

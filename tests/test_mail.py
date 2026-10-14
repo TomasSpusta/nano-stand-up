@@ -6,7 +6,7 @@ import pytest
 
 from nano_standup.mail import Message, SmtpMailSender, SmtpSettings
 
-MESSAGE = Message(from_address="standup@example.org", to="hana.testova@example.org", subject="Brief: TEST-SEM", html="<p>Hi</p>")
+MESSAGE = Message(from_address="standup@example.org", to="hana.testova@example.org", subject="Brief: TEST-SEM", html="<p>Hi</p>", text="Hi")
 
 
 class FakeSmtp:
@@ -48,7 +48,7 @@ def smtp(monkeypatch: pytest.MonkeyPatch) -> list[FakeSmtp]:
     return FakeSmtp.instances
 
 
-def test_sends_an_html_message_without_login_or_tls(smtp: list[FakeSmtp]) -> None:
+def test_sends_plain_text_and_html_versions_without_login_or_tls(smtp: list[FakeSmtp]) -> None:
     SmtpMailSender(SmtpSettings(host="localhost", port=1025), timeout_seconds=5).send(MESSAGE)
 
     [server] = smtp
@@ -58,8 +58,11 @@ def test_sends_an_html_message_without_login_or_tls(smtp: list[FakeSmtp]) -> Non
     assert email["From"] == "standup@example.org"
     assert email["To"] == "hana.testova@example.org"
     assert email["Subject"] == "Brief: TEST-SEM"
-    assert email.get_content_type() == "text/html"
-    assert email.get_content().strip() == "<p>Hi</p>"
+    assert email.get_content_type() == "multipart/alternative"
+    plain, rich = email.iter_parts()
+    # Mail clients show the last version they can read, so HTML goes last.
+    assert (plain.get_content_type(), plain.get_content().strip()) == ("text/plain", "Hi")
+    assert (rich.get_content_type(), rich.get_content().strip()) == ("text/html", "<p>Hi</p>")
 
 
 def test_starts_tls_then_logs_in_before_sending(smtp: list[FakeSmtp]) -> None:

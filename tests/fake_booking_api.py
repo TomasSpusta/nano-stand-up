@@ -2,12 +2,21 @@
 
 from typing import Any
 
-from nano_standup.booking_api import BookingApiError, Params
+from nano_standup.booking_api import (
+    CANCELLED_STATE,
+    CANCELLED_STATUS,
+    REQUESTED_STATUS,
+    RESERVED_STATUS,
+    BookingApiError,
+    Params,
+)
 
 MAX_PAGE_SIZE = 50  # The real API fails with a server error on larger pages when it expands activity parties.
 # The real API fails with a server error on some pages of the reservation list when it expands the user.
 # It works on a single reservation.
 LIST_SCOPES_THAT_FAIL = {"ge_realised_for_contactid"}
+# The statecode that goes with each statuscode, as in real data.
+STATECODES = {RESERVED_STATUS: 3, REQUESTED_STATUS: 0, CANCELLED_STATUS: CANCELLED_STATE}
 
 
 class FakeBookingApi:
@@ -91,10 +100,18 @@ def reservation_json(
     subject: str = "2026-000001/RG-1-01",
     firstname: str = "Petr",
     lastname: str = "Vymysleny",
+    statuscode: int = RESERVED_STATUS,
+    note: str | None = None,
+    private_note: str | None = None,
 ) -> dict[str, Any]:  # Any: mirrors the API's JSON.
+    """The statecode follows the statuscode, as in real data. An unknown statuscode gets the reserved statecode."""
     return {
         "id": id,
         "subject": subject,
+        "statecode": STATECODES.get(statuscode, STATECODES[RESERVED_STATUS]),
+        "statuscode": statuscode,
+        "description": note,
+        "ge_privatedescription": private_note,
         "scheduledstart": start,
         "scheduledend": end,
         "activity_parties": [

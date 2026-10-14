@@ -39,6 +39,7 @@ _Avoid_: Alert, warning, AI summary, insight
 
 **Reservation**:
 A booked time slot on an instrument for a user and a project.
+Its status is reserved (the normal case, "Rezervováno" in the booking system), requested, or cancelled.
 _Avoid_: Booking, appointment, session
 
 **Certificate**:
@@ -49,6 +50,25 @@ _Avoid_: Certification, training, licence
 **New user**:
 A user whose reservation is one of their first 3 on the instrument since the start of their earliest certificate for it.
 _Avoid_: First-timer, newcomer, beginner
+
+**Note**:
+The user's free text on a reservation itself, apart from the experiment plan.
+Users often copy the experiment plan into it, so a brief shows it only when it adds something.
+_Avoid_: Description, comment
+
+**Private note**:
+A note on a reservation that only staff can see.
+_Avoid_: Private description, internal note
+
+**Requested reservation**:
+A reservation waiting for the guarantor to approve it, so it may not happen.
+The booking system calls it "Požadováno" (Requested), statuscode 1.
+A brief highlights it and counts it as "waiting for your approval", because the guarantor has to act on it.
+_Avoid_: Tentative, pending, unconfirmed
+
+**Cancelled reservation**:
+A reservation the user cancelled. The booking system keeps it, and a brief shows it crossed out.
+_Avoid_: Deleted, removed
 
 **Experiment plan**:
 The user's written description of what they will do in a reservation.

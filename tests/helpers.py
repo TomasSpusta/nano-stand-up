@@ -3,7 +3,7 @@
 from datetime import datetime
 from html.parser import HTMLParser
 
-from nano_standup.domain import Guarantor, Instrument, Reservation
+from nano_standup.domain import Guarantor, Instrument, Reservation, ReservationStatus
 
 GUARANTOR = Guarantor(name="Hana Testova", email="hana.testova@example.org")
 INSTRUMENT = Instrument(id="instr-1", name="Test Electron Microscope", alias="TEST-SEM", guarantor=GUARANTOR)
@@ -17,6 +17,9 @@ def reservation(
     project_code: str = "2026-000001/RG-1-01",
     experiment_plan: str = "Imaging of samples",
     id: str | None = None,
+    status: ReservationStatus = ReservationStatus.RESERVED,
+    note: str = "",
+    private_note: str = "",
 ) -> Reservation:
     return Reservation(
         id=id or f"res-{start}",
@@ -26,6 +29,9 @@ def reservation(
         user_name=user_name,
         project_code=project_code,
         experiment_plan=experiment_plan,
+        status=status,
+        note=note,
+        private_note=private_note,
     )
 
 

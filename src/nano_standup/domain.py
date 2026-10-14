@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
+from enum import Enum
 from zoneinfo import ZoneInfo
 
 # The booking system and the guarantors work in Prague time.
@@ -36,6 +37,14 @@ class Instrument:
         return f"{self.alias} ({self.id})"
 
 
+class ReservationStatus(Enum):
+    RESERVED = "reserved"
+    # Waiting for the guarantor to approve it, so it may not happen.
+    REQUESTED = "requested"
+    # The booking system keeps cancelled reservations.
+    CANCELLED = "cancelled"
+
+
 @dataclass(frozen=True)
 class Reservation:
     """Times are naive Prague local time, as the booking system gives them."""
@@ -47,6 +56,15 @@ class Reservation:
     user_name: str
     project_code: str
     experiment_plan: str
+    status: ReservationStatus
+    # The user's note on the reservation. Often it repeats the experiment plan.
+    note: str
+    # A note only staff can see.
+    private_note: str
+
+    @property
+    def duration(self) -> timedelta:
+        return self.end - self.start
 
 
 @dataclass(frozen=True)
