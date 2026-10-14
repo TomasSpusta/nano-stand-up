@@ -12,9 +12,14 @@ from datetime import date, datetime, timedelta
 from nano_standup.domain import PRAGUE, Instrument, Reservation, ReservationStatus, Week
 
 NO_EXPERIMENT_PLAN = "No experiment plan given"
+NO_RESERVATIONS_THIS_WEEK = "No reservations this week."
 FOOTER_REMINDER = "Check the booking system for later changes."
 # Saturday and Sunday, as date.weekday() gives them.
 WEEKEND = {5, 6}
+GREY_TEXT = "#666666"
+FADED_TEXT = "#888888"
+WARNING_TEXT = "#b45309"
+DANGER_TEXT = "#b91c1c"
 MARKS = {ReservationStatus.CANCELLED: "Cancelled", ReservationStatus.TENTATIVE: "Tentative"}
 
 
@@ -30,7 +35,9 @@ class _Row:
     """One reservation as the brief shows it. Empty strings are left out."""
 
     status: ReservationStatus
-    time_span: str
+    start: str
+    # The end time, with the end day when it is on a later day: "Tue 13:00".
+    end: str
     length: str
     user_name: str
     project_code: str
@@ -45,12 +52,30 @@ class _Row:
 
 @dataclass(frozen=True)
 class _Day:
-    day: date
+    calendar_day: date
     rows: list[_Row]
 
     @property
     def heading(self) -> str:
-        return f"{self.day:%A} {_day_month(self.day)}"
+        return f"{self.calendar_day:%A} {_day_month(self.calendar_day)}"
+
+
+@dataclass(frozen=True)
+class _Content:
+    """What both versions of a brief show."""
+
+    subject: str
+    for_whom: str
+    instrument_name: str
+    week_line: str
+    # Empty for a week without reservations: it gets a short brief with no counts and no days.
+    counts: list[tuple[str, str]]
+    days: list[_Day]
+    built: str
+
+    @property
+    def has_reservations(self) -> bool:
+        return bool(self.days)
 
 
 def build_brief(
@@ -61,28 +86,23 @@ def build_brief(
         raise ValueError(f"built_at must carry a time zone, got {built_at.isoformat()}")
     reservations = sorted(reservations, key=lambda r: r.start)
     built_local = built_at.astimezone(PRAGUE)
-    subject = f"Brief: {instrument.alias} - week {_week_span(week)}"
-    header = [
-        f"Weekly brief for {instrument.guarantor.name}",
-        instrument.name,
-        f"{instrument.alias} - Monday {_day_month(week.monday)} to Sunday {_day_month(week.sunday)} {week.sunday.year}",
-    ]
-    built = f"Built on {built_local:%A} {_day_month(built_local.date())} {built_local.year} at {built_local:%H:%M}."
-    # A week with no reservations at all gets a short brief: no counts and no days.
-    counts = _counts(reservations) if reservations else []
-    days = _days(week, reservations) if reservations else []
-    return Brief(
-        subject=subject,
-        html=_html(subject, header, counts, days, built),
-        text=_text(header, counts, days, built),
+    content = _Content(
+        subject=f"Brief: {instrument.alias} - week {_week_span(week)}",
+        for_whom=f"Weekly brief for {instrument.guarantor.name}",
+        instrument_name=instrument.name,
+        week_line=f"{instrument.alias} - Monday {_day_month(week.monday)} to Sunday {_day_month(week.sunday)} {week.sunday.year}",
+        counts=_counts(reservations) if reservations else [],
+        days=_days(week, reservations) if reservations else [],
+        built=f"Built on {built_local:%A} {_day_month(built_local.date())} {built_local.year} at {built_local:%H:%M}.",
     )
+    return Brief(subject=content.subject, html=_html(content), text=_text(content))
 
 
 def _counts(reservations: list[Reservation]) -> list[tuple[str, str]]:
     """(value, label) pairs. Cancelled reservations count only as cancelled."""
     active = [r for r in reservations if r.status is not ReservationStatus.CANCELLED]
     cancelled = len(reservations) - len(active)
-    hours = sum((r.end - r.start).total_seconds() for r in active) / 3600
+    hours = sum(r.duration.total_seconds() for r in active) / 3600
     # Reservations with no user id still count each user name once.
     users = len({r.user_id or r.user_name for r in active})
     without_experiment_plan = sum(1 for r in active if not r.experiment_plan.strip())
@@ -109,7 +129,8 @@ def _row(reservation: Reservation) -> _Row:
     note = reservation.note.strip()
     return _Row(
         status=reservation.status,
-        time_span=_time_span(reservation),
+        start=f"{reservation.start:%H:%M}",
+        end=_end(reservation),
         length=_length(reservation),
         user_name=reservation.user_name,
         project_code=reservation.project_code,
@@ -120,30 +141,31 @@ def _row(reservation: Reservation) -> _Row:
 
 
 def _adds_to(note: str, experiment_plan: str) -> bool:
-    """Users often copy the experiment plan into the note. The note adds something only when it holds more."""
+    """Users often copy the experiment plan into the note. The note adds something only when it holds more.
+
+    Whole words only: the note "ok" adds to the experiment plan "Imaging of books".
+    """
     note = _comparable(note)
-    return bool(note) and note not in _comparable(experiment_plan)
+    return bool(note) and f" {note} " not in f" {_comparable(experiment_plan)} "
 
 
 def _comparable(text: str) -> str:
     return " ".join(text.casefold().split())
 
 
-def _time_span(reservation: Reservation) -> str:
-    """"09:00 to 11:00". An end on a later day shows the day, "15:00 to Tue 13:00", and the date too when a week or more later."""
+def _end(reservation: Reservation) -> str:
+    """"11:00". An end on a later day shows the day, "Tue 13:00", and the date too when a week or more later."""
     start, end = reservation.start, reservation.end
     if end.date() == start.date():
-        end_text = f"{end:%H:%M}"
-    elif end.date() - start.date() < timedelta(days=7):
-        end_text = f"{end:%a %H:%M}"
-    else:
-        end_text = f"{end:%a} {_day_month(end.date())} {end:%H:%M}"
-    return f"{start:%H:%M} to {end_text}"
+        return f"{end:%H:%M}"
+    if end.date() - start.date() < timedelta(days=7):
+        return f"{end:%a %H:%M}"
+    return f"{end:%a} {_day_month(end.date())} {end:%H:%M}"
 
 
 def _length(reservation: Reservation) -> str:
     """Under an hour in minutes, "15 min"; longer in hours, "3.5 h"."""
-    minutes = round((reservation.end - reservation.start).total_seconds() / 60)
+    minutes = round(reservation.duration.total_seconds() / 60)
     if minutes < 60:
         return f"{minutes} min"
     return f"{_format_hours(minutes / 60)} h"
@@ -152,24 +174,24 @@ def _length(reservation: Reservation) -> str:
 # Plain text
 
 
-def _text(header: list[str], counts: list[tuple[str, str]], days: list[_Day], built: str) -> str:
-    lines = [*header, ""]
-    if counts:
-        lines += [", ".join(f"{value} {label}" for value, label in counts), ""]
+def _text(content: _Content) -> str:
+    lines = [content.for_whom, content.instrument_name, content.week_line, ""]
+    if content.has_reservations:
+        lines += [", ".join(f"{value} {label}" for value, label in content.counts), ""]
     else:
-        lines += ["No reservations this week.", ""]
-    for day in days:
+        lines += [NO_RESERVATIONS_THIS_WEEK, ""]
+    for day in content.days:
         lines.append(day.heading.upper())
         lines += [line for row in day.rows for line in _row_text(row)] or ["  No reservations"]
         lines.append("")
-    lines += [built, FOOTER_REMINDER]
+    lines += [content.built, FOOTER_REMINDER]
     return "\n".join(lines) + "\n"
 
 
 def _row_text(row: _Row) -> list[str]:
     mark = f"[{row.mark}] " if row.mark else ""
     lines = [
-        f"  {mark}{row.time_span} ({row.length})",
+        f"  {mark}{row.start} to {row.end} ({row.length})",
         f"    {', '.join(part for part in (row.user_name, row.project_code) if part)}",
         *_indented(row.experiment_plan or NO_EXPERIMENT_PLAN),
     ]
@@ -187,25 +209,26 @@ def _indented(text: str) -> list[str]:
 # HTML
 
 
-def _html(subject: str, header: list[str], counts: list[tuple[str, str]], days: list[_Day], built: str) -> str:
-    for_whom, name, week_line = (_html_text(line) for line in header)
-    body = _counts_html(counts) + "".join(_day_html(day) for day in days) if counts else (
-        '<p style="margin:16px 0 8px;">No reservations this week.</p>'
-    )
+def _html(content: _Content) -> str:
+    if content.has_reservations:
+        body = _counts_html(content.counts) + "".join(_day_html(day) for day in content.days)
+    else:
+        body = f'<p style="margin:16px 0 8px;">{NO_RESERVATIONS_THIS_WEEK}</p>'
+
     # Outlook ignores max-width, so it gets a fixed-width table instead.
     return f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{_html_text(subject)}</title></head>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{_html_text(content.subject)}</title></head>
 <body style="margin:0;background:#f4f4f5;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1a1a1a;line-height:1.4;">
   <!--[if mso]><table role="presentation" width="640" align="center" cellspacing="0" cellpadding="0"><tr><td><![endif]-->
   <div style="max-width:640px;margin:0 auto;padding:16px;">
     <div style="background:#ffffff;border-radius:8px;padding:20px 20px 12px;">
-      <div style="font-size:13px;color:#666666;">{for_whom}</div>
-      <h1 style="font-size:20px;margin:4px 0 2px;">{name}</h1>
-      <div style="color:#666666;font-size:13px;">{week_line}</div>
+      <div style="font-size:13px;color:{GREY_TEXT};">{_html_text(content.for_whom)}</div>
+      <h1 style="font-size:20px;margin:4px 0 2px;">{_html_text(content.instrument_name)}</h1>
+      <div style="color:{GREY_TEXT};font-size:13px;">{_html_text(content.week_line)}</div>
       {body}
     </div>
     <div style="color:#777777;font-size:12px;padding:12px 4px;">
-      {built}
+      {content.built}
       {FOOTER_REMINDER}
     </div>
   </div>
@@ -225,7 +248,7 @@ def _counts_html(counts: list[tuple[str, str]]) -> str:
 
 def _day_html(day: _Day) -> str:
     rows = "".join(_row_html(row) for row in day.rows) or (
-        '<tr><td style="padding:8px 0;color:#888888;">No reservations</td></tr>'
+        f'<tr><td style="padding:8px 0;color:{FADED_TEXT};">No reservations</td></tr>'
     )
     return f"""
       <div style="border-top:1px solid #e5e5e5;padding-top:10px;margin-top:4px;">
@@ -237,11 +260,10 @@ def _day_html(day: _Day) -> str:
 def _row_html(row: _Row) -> str:
     cancelled = row.status is ReservationStatus.CANCELLED
     # The mark itself is not crossed out, so it stays easy to read.
-    crossed = "text-decoration:line-through;color:#888888;" if cancelled else ""
+    crossed = f"text-decoration:line-through;color:{FADED_TEXT};" if cancelled else ""
     # A narrow column may break the time span only after "to", never inside "Wed 13:00".
-    start, end = row.time_span.split(" to ")
-    time_span = f"{start.replace(' ', '&nbsp;')} to {end.replace(' ', '&nbsp;')}"
-    mark_color = "#b91c1c" if cancelled else "#b45309"
+    time_span = f"{row.start} to {row.end.replace(' ', '&nbsp;')}"
+    mark_color = DANGER_TEXT if cancelled else WARNING_TEXT
     mark = (
         f'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:{mark_color};">{row.mark}</div>'
         if row.mark
@@ -250,7 +272,7 @@ def _row_html(row: _Row) -> str:
     experiment_plan = (
         _html_text(row.experiment_plan)
         if row.experiment_plan
-        else f'<span style="color:#b45309;font-style:italic;">{NO_EXPERIMENT_PLAN}</span>'
+        else f'<span style="color:{WARNING_TEXT};font-style:italic;">{NO_EXPERIMENT_PLAN}</span>'
     )
     return f"""
           <tr>

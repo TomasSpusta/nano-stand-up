@@ -152,3 +152,23 @@ def test_get_reservations_reads_status_note_and_private_note(api: FakeBookingApi
     assert (reservations["booked"].note, reservations["booked"].private_note) == ("", "")
     assert reservations["tentative"].note == "Bring own holder"
     assert reservations["cancelled"].private_note == "Paid by the group"
+
+
+def test_get_reservations_treats_a_cancelled_state_as_cancelled_whatever_its_status(api: FakeBookingApi) -> None:
+    api.reservations = [reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", status=4)]
+    api.reservations[0]["statecode"] = 2
+
+    [reservation] = ApiBookingSource(api).get_reservations(SEM, WEEK)
+
+    assert reservation.status is ReservationStatus.CANCELLED
+
+
+def test_get_reservations_logs_an_unknown_status_and_shows_it_as_booked(
+    api: FakeBookingApi, caplog: pytest.LogCaptureFixture
+) -> None:
+    api.reservations = [reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", status=7)]
+
+    [reservation] = ApiBookingSource(api).get_reservations(SEM, WEEK)
+
+    assert reservation.status is ReservationStatus.BOOKED
+    assert "Reservation r1 has an unknown statuscode 7" in caplog.text

@@ -50,6 +50,23 @@ _Avoid_: Certification, training, licence
 A user whose reservation is one of their first 3 on the instrument since the start of their earliest certificate for it.
 _Avoid_: First-timer, newcomer, beginner
 
+**Note**:
+The user's free text on a reservation itself, apart from the experiment plan.
+Users often copy the experiment plan into it, so a brief shows it only when it adds something.
+_Avoid_: Description, comment
+
+**Private note**:
+A note on a reservation that only staff can see.
+_Avoid_: Private description, internal note
+
+**Tentative reservation**:
+A reservation that may not happen. The booking system shows it as open (status 1).
+_Avoid_: Pending, unconfirmed
+
+**Cancelled reservation**:
+A reservation the user cancelled. The booking system keeps it, and a brief shows it crossed out.
+_Avoid_: Deleted, removed
+
 **Experiment plan**:
 The user's written description of what they will do in a reservation.
 It is stored apart from the reservation and may be missing.

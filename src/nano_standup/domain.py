@@ -2,8 +2,8 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum
 from datetime import date, datetime, time, timedelta
+from enum import Enum
 from zoneinfo import ZoneInfo
 
 # The booking system and the guarantors work in Prague time.
@@ -61,6 +61,10 @@ class Reservation:
     note: str
     # A note only staff can see.
     private_note: str
+
+    @property
+    def duration(self) -> timedelta:
+        return self.end - self.start
 
 
 @dataclass(frozen=True)

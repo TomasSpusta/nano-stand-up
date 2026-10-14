@@ -114,7 +114,9 @@ def test_a_build_time_without_a_time_zone_is_refused() -> None:
 def test_a_cancelled_reservation_is_crossed_out_marked_and_counted_apart() -> None:
     reservations = [
         reservation("2026-10-19T09:00", "2026-10-19T12:00", user_name="Petr Vymysleny"),
-        reservation("2026-10-20T13:00", "2026-10-20T15:00", user_name="Jana Smyslena", experiment_plan="", status=ReservationStatus.CANCELLED),
+        reservation(
+            "2026-10-20T13:00", "2026-10-20T15:00", user_name="Jana Smyslena", experiment_plan="", status=ReservationStatus.CANCELLED
+        ),
     ]
 
     html = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html
@@ -131,7 +133,9 @@ def test_a_cancelled_reservation_is_crossed_out_marked_and_counted_apart() -> No
 
 
 def test_a_tentative_reservation_is_marked_and_still_counted() -> None:
-    reservations = [reservation("2026-10-19T09:00", "2026-10-19T12:00", user_name="Jana Smyslena", status=ReservationStatus.TENTATIVE)]
+    reservations = [
+        reservation("2026-10-19T09:00", "2026-10-19T12:00", user_name="Jana Smyslena", status=ReservationStatus.TENTATIVE)
+    ]
 
     text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
 
@@ -180,9 +184,13 @@ def test_each_reservation_shows_its_length(start: str, end: str, length: str) ->
         ("SEM imaging", "  sem   IMAGING ", False),
         ("SEM imaging of thin films", "thin films", False),
         ("", "Thin films", True),
+        # Only whole words count: "ok" is not inside "Imaging of books".
+        ("Imaging of books", "ok", True),
     ],
 )
-def test_the_note_is_shown_only_when_it_adds_to_the_experiment_plan(experiment_plan: str, note: str, shown: bool) -> None:
+def test_the_note_is_shown_only_when_it_adds_to_the_experiment_plan(
+    experiment_plan: str, note: str, shown: bool
+) -> None:
     reservations = [reservation("2026-10-19T09:00", "2026-10-19T10:00", experiment_plan=experiment_plan, note=note)]
 
     text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
@@ -240,9 +248,18 @@ def test_a_week_with_only_cancelled_reservations_still_lists_them() -> None:
 
 def test_the_plain_text_version_shows_the_same_week() -> None:
     reservations = [
-        reservation("2026-10-20T15:00", "2026-10-21T13:00", user_name="Jana Smyslena", project_code="2026-123456/RG-1-01",
-                    experiment_plan="SEM imaging", note="Bring own holder", private_note="Paid by the group"),
-        reservation("2026-10-20T09:00", "2026-10-20T09:30", user_name="Karel Neexistujici", experiment_plan="", status=ReservationStatus.TENTATIVE),
+        reservation(
+            "2026-10-20T15:00",
+            "2026-10-21T13:00",
+            user_name="Jana Smyslena",
+            project_code="2026-123456/RG-1-01",
+            experiment_plan="SEM imaging",
+            note="Bring own holder",
+            private_note="Paid by the group",
+        ),
+        reservation(
+            "2026-10-20T09:00", "2026-10-20T09:30", user_name="Karel Neexistujici", experiment_plan="", status=ReservationStatus.TENTATIVE
+        ),
         reservation("2026-10-22T09:00", "2026-10-22T10:00", user_name="Petr Vymysleny", status=ReservationStatus.CANCELLED),
     ]
 
