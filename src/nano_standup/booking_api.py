@@ -18,11 +18,14 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from nano_standup.booking_source import InstrumentNotFound
-from nano_standup.domain import Guarantor, Instrument, Reservation, Week
+from nano_standup.domain import Guarantor, Instrument, Reservation, ReservationStatus, Week
 
 Params = dict[str, str | int | list[str]]
 
 PAGE_SIZE = 50
+# The booking system's statuscode. Any other code (such as 4, "reserved") is a booked reservation.
+TENTATIVE_STATUS = 1
+CANCELLED_STATUS = 9
 # A recording starts about when its reservation does. One day of margin each side is enough to find it.
 RECORDING_MARGIN = timedelta(days=1)
 
@@ -165,7 +168,18 @@ def _reservation(item: dict[str, Any], experiment_plan: str) -> Reservation:  # 
         user_name=name or "Unknown user",
         project_code=(item.get("subject") or "").strip(),
         experiment_plan=experiment_plan,
+        status=_status(item.get("statuscode")),
+        note=item.get("description") or "",
+        private_note=item.get("ge_privatedescription") or "",
     )
+
+
+def _status(statuscode: object) -> ReservationStatus:
+    if statuscode == CANCELLED_STATUS:
+        return ReservationStatus.CANCELLED
+    if statuscode == TENTATIVE_STATUS:
+        return ReservationStatus.TENTATIVE
+    return ReservationStatus.BOOKED
 
 
 def _required(item: Any, key: str, what: str) -> Any:  # Any: parsed JSON.

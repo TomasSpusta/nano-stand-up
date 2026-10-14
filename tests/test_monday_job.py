@@ -47,7 +47,9 @@ def test_sends_one_brief_per_active_subscription_to_the_subscriber(tmp_path: Pat
     assert "Jana Smyslena" in sem_text
     assert "Karel Neexistujici" not in sem_text
     assert "Built on Monday 19. 10. 2026 at 08:00." in sem_text
-    assert "0 reservations" in visible_text(sent[1].html)
+    assert "No reservations this week." in visible_text(sent[1].html)
+    assert "Jana Smyslena" in sent[0].text
+    assert "No reservations this week." in sent[1].text
 
 
 def test_sends_nothing_without_subscriptions(tmp_path: Path) -> None:

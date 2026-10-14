@@ -91,10 +91,17 @@ def reservation_json(
     subject: str = "2026-000001/RG-1-01",
     firstname: str = "Petr",
     lastname: str = "Vymysleny",
+    status: int = 4,
+    note: str | None = None,
+    private_note: str | None = None,
 ) -> dict[str, Any]:  # Any: mirrors the API's JSON.
+    """`status` is the booking system's statuscode: 4 reserved, 1 tentative, 9 cancelled."""
     return {
         "id": id,
         "subject": subject,
+        "statuscode": status,
+        "description": note,
+        "ge_privatedescription": private_note,
         "scheduledstart": start,
         "scheduledend": end,
         "activity_parties": [

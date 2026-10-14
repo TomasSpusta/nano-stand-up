@@ -25,7 +25,9 @@ def run_monday_job(
         instrument = source.get_instrument(subscription.instrument_id)
         reservations = source.get_reservations(instrument.id, week)
         brief = build_brief(instrument, week, reservations, built_at=now)
-        mail_sender.send(Message(from_address=from_address, to=subscription.email, subject=brief.subject, html=brief.html))
+        mail_sender.send(
+            Message(from_address=from_address, to=subscription.email, subject=brief.subject, html=brief.html, text=brief.text)
+        )
         log.info("Sent brief for %s to %s", instrument.label, subscription.email)
         sent += 1
     return sent

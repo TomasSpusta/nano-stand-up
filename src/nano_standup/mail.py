@@ -12,6 +12,8 @@ class Message:
     to: str
     subject: str
     html: str
+    # The same content for mail clients that do not show HTML.
+    text: str
 
 
 class MailSender(Protocol):
@@ -45,7 +47,9 @@ class SmtpMailSender:
         email["From"] = message.from_address
         email["To"] = message.to
         email["Subject"] = message.subject
-        email.set_content(message.html, subtype="html")
+        # Mail clients show the last version they can read, so HTML goes last.
+        email.set_content(message.text)
+        email.add_alternative(message.html, subtype="html")
         settings = self._settings
         with smtplib.SMTP(settings.host, settings.port, timeout=self._timeout) as smtp:
             if settings.starttls:

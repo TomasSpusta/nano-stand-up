@@ -4,7 +4,7 @@ import pytest
 
 from nano_standup.booking_api import ApiBookingSource, BookingDataError
 from nano_standup.booking_source import InstrumentNotFound
-from nano_standup.domain import Guarantor, Week
+from nano_standup.domain import Guarantor, ReservationStatus, Week
 
 from fake_booking_api import SEM_ID as SEM
 from fake_booking_api import FakeBookingApi, guarantor_json, instrument_json, recording, reservation_json, sem_json
@@ -133,3 +133,22 @@ def test_get_instrument_names_the_instrument_when_its_id_is_missing(api: FakeBoo
 
     with pytest.raises(BookingDataError, match=SEM):
         ApiBookingSource(api).get_instrument(SEM)
+
+
+def test_get_reservations_reads_status_note_and_private_note(api: FakeBookingApi) -> None:
+    api.reservations = [
+        reservation_json("booked", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", status=4, note=None, private_note=None),
+        reservation_json("tentative", SEM, "2026-10-21T09:00:00", "2026-10-21T10:00:00", status=1, note="Bring own holder"),
+        reservation_json("cancelled", SEM, "2026-10-22T09:00:00", "2026-10-22T10:00:00", status=9, private_note="Paid by the group"),
+    ]
+
+    reservations = {r.id: r for r in ApiBookingSource(api).get_reservations(SEM, WEEK)}
+
+    assert {i: r.status for i, r in reservations.items()} == {
+        "booked": ReservationStatus.BOOKED,
+        "tentative": ReservationStatus.TENTATIVE,
+        "cancelled": ReservationStatus.CANCELLED,
+    }
+    assert (reservations["booked"].note, reservations["booked"].private_note) == ("", "")
+    assert reservations["tentative"].note == "Bring own holder"
+    assert reservations["cancelled"].private_note == "Paid by the group"
