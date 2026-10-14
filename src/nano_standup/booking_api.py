@@ -188,8 +188,8 @@ def _status(item: dict[str, Any], what: str) -> ReservationStatus:  # Any: parse
     if statuscode == REQUESTED_STATUS:
         return ReservationStatus.REQUESTED
     if statuscode != RESERVED_STATUS:
-        log.warning("%s has an unknown statuscode %r (statecode %r); the brief shows it as booked", what, statuscode, statecode)
-    return ReservationStatus.BOOKED
+        log.warning("%s has an unknown statuscode %r (statecode %r); the brief shows it as reserved", what, statuscode, statecode)
+    return ReservationStatus.RESERVED
 
 
 def _required(item: Any, key: str, what: str) -> Any:  # Any: parsed JSON.

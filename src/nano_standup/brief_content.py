@@ -1,0 +1,189 @@
+"""What a brief shows, worked out once from an instrument's week. The HTML and plain-text versions both draw it."""
+
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+
+from nano_standup.domain import PRAGUE, Instrument, Reservation, ReservationStatus, Week
+
+NO_EXPERIMENT_PLAN = "No experiment plan given"
+NO_RESERVATIONS_THIS_WEEK = "No reservations this week."
+NO_RESERVATIONS_THIS_DAY = "No reservations"
+FOOTER_REMINDER = "Check the booking system for later changes."
+# Saturday and Sunday, as date.weekday() gives them.
+WEEKEND = {5, 6}
+MARKS = {
+    ReservationStatus.CANCELLED: "Cancelled",
+    ReservationStatus.REQUESTED: "Requested: needs your approval",
+}
+
+
+@dataclass(frozen=True)
+class Count:
+    value: str
+    label: str
+    # The guarantor has to act on it, so the brief makes it stand out.
+    needs_action: bool = False
+
+
+@dataclass(frozen=True)
+class Row:
+    """One reservation as the brief shows it. Empty strings are left out."""
+
+    status: ReservationStatus
+    start: str
+    # The end time, with the end day when it is on a later day: "Tue 13:00".
+    end: str
+    length: str
+    user_name: str
+    project_code: str
+    experiment_plan: str
+    note: str
+    private_note: str
+
+    @property
+    def mark(self) -> str:
+        return MARKS.get(self.status, "")
+
+
+@dataclass(frozen=True)
+class Day:
+    calendar_day: date
+    rows: list[Row]
+
+    @property
+    def heading(self) -> str:
+        return f"{self.calendar_day:%A} {_day_month(self.calendar_day)}"
+
+
+@dataclass(frozen=True)
+class BriefContent:
+    subject: str
+    for_whom: str
+    instrument_name: str
+    week_line: str
+    # Empty for a week without reservations: it gets a short brief with no counts and no days.
+    counts: list[Count]
+    days: list[Day]
+    built: str
+
+    @property
+    def has_reservations(self) -> bool:
+        return bool(self.days)
+
+
+def brief_content(
+    instrument: Instrument, week: Week, reservations: list[Reservation], built_at: datetime
+) -> BriefContent:
+    """`built_at` must carry a time zone; the footer shows it in Prague time."""
+    if built_at.tzinfo is None:
+        raise ValueError(f"built_at must carry a time zone, got {built_at.isoformat()}")
+    reservations = sorted(reservations, key=lambda r: r.start)
+    built_local = built_at.astimezone(PRAGUE)
+    return BriefContent(
+        subject=f"Brief: {instrument.alias} - week {_week_span(week)}",
+        for_whom=f"Weekly brief for {instrument.guarantor.name}",
+        instrument_name=instrument.name,
+        week_line=f"{instrument.alias} - Monday {_day_month(week.monday)} to Sunday {_day_month(week.sunday)} {week.sunday.year}",
+        counts=_counts(reservations) if reservations else [],
+        days=_days(week, reservations) if reservations else [],
+        built=f"Built on {built_local:%A} {_day_month(built_local.date())} {built_local.year} at {built_local:%H:%M}.",
+    )
+
+
+def _counts(reservations: list[Reservation]) -> list[Count]:
+    """Cancelled reservations count only as cancelled. Requested ones count as reservations too."""
+    active = [r for r in reservations if r.status is not ReservationStatus.CANCELLED]
+    cancelled = len(reservations) - len(active)
+    requested = sum(1 for r in active if r.status is ReservationStatus.REQUESTED)
+    hours = sum(r.duration.total_seconds() for r in active) / 3600
+    # Reservations with no user id still count each user name once.
+    users = len({r.user_id or r.user_name for r in active})
+    without_experiment_plan = sum(1 for r in active if not r.experiment_plan.strip())
+    # Shown only when there is something to approve, and first, because it asks the guarantor to act.
+    waiting = [Count(str(requested), "waiting for your approval", needs_action=True)] if requested else []
+    return waiting + [
+        Count(str(len(active)), _plural(len(active), "reservation")),
+        Count(f"{_format_hours(hours)} h", "booked"),
+        Count(str(users), _plural(users, "user")),
+        Count(str(without_experiment_plan), "without an experiment plan"),
+        Count(str(cancelled), "cancelled"),
+    ]
+
+
+def _days(week: Week, reservations: list[Reservation]) -> list[Day]:
+    """Every weekday, empty or not. Weekend days only when they have reservations."""
+    days = []
+    for day in week.days():
+        rows = [_row(r) for r in reservations if r.start.date() == day]
+        if rows or day.weekday() not in WEEKEND:
+            days.append(Day(day, rows))
+    return days
+
+
+def _row(reservation: Reservation) -> Row:
+    note = reservation.note.strip()
+    return Row(
+        status=reservation.status,
+        start=f"{reservation.start:%H:%M}",
+        end=_end(reservation),
+        length=_length(reservation),
+        user_name=reservation.user_name,
+        project_code=reservation.project_code,
+        experiment_plan=reservation.experiment_plan.strip(),
+        note=note if _adds_to(note, reservation.experiment_plan) else "",
+        private_note=reservation.private_note.strip(),
+    )
+
+
+def _adds_to(note: str, experiment_plan: str) -> bool:
+    """Users often copy the experiment plan into the note. The note adds something only when it holds more.
+
+    Whole words only: the note "ok" adds to the experiment plan "Imaging of books".
+    """
+    note = _comparable(note)
+    return bool(note) and f" {note} " not in f" {_comparable(experiment_plan)} "
+
+
+def _comparable(text: str) -> str:
+    return " ".join(text.casefold().split())
+
+
+def _end(reservation: Reservation) -> str:
+    """"11:00". An end on a later day shows the day, "Tue 13:00", and the date too when a week or more later."""
+    start, end = reservation.start, reservation.end
+    if end.date() == start.date():
+        return f"{end:%H:%M}"
+    if end.date() - start.date() < timedelta(days=7):
+        return f"{end:%a %H:%M}"
+    return f"{end:%a} {_day_month(end.date())} {end:%H:%M}"
+
+
+def _length(reservation: Reservation) -> str:
+    """Under an hour in minutes, "15 min"; longer in hours, "3.5 h"."""
+    minutes = round(reservation.duration.total_seconds() / 60)
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{_format_hours(minutes / 60)} h"
+
+
+def _plural(count: int, word: str) -> str:
+    return word if count == 1 else f"{word}s"
+
+
+def _format_hours(value: float) -> str:
+    """One decimal place, dropped when the value is whole: "6.5", "3"."""
+    return f"{value:.1f}".removesuffix(".0")
+
+
+def _week_span(week: Week) -> str:
+    """"19.-25. 10. 2026", or "28. 9.-4. 10. 2026" when the week spans two months."""
+    monday, sunday = week.monday, week.sunday
+    if monday.year != sunday.year:
+        return f"{_day_month(monday)} {monday.year}-{_day_month(sunday)} {sunday.year}"
+    if monday.month != sunday.month:
+        return f"{_day_month(monday)}-{_day_month(sunday)} {sunday.year}"
+    return f"{monday.day}.-{_day_month(sunday)} {sunday.year}"
+
+
+def _day_month(day: date) -> str:
+    return f"{day.day}. {day.month}."

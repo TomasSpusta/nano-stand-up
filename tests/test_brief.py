@@ -132,16 +132,43 @@ def test_a_cancelled_reservation_is_crossed_out_marked_and_counted_apart() -> No
     assert "line-through" in row
 
 
-def test_a_requested_reservation_is_marked_and_still_counted() -> None:
+def test_a_requested_reservation_is_marked_highlighted_and_still_counted() -> None:
     reservations = [
         reservation("2026-10-19T09:00", "2026-10-19T12:00", user_name="Jana Smyslena", status=ReservationStatus.REQUESTED)
     ]
 
-    text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
+    html = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html
+    text = visible_text(html)
 
-    assert "09:00 to 12:00 3 h Requested Jana Smyslena" in text
+    assert "09:00 to 12:00 3 h Requested: needs your approval Jana Smyslena" in text
     assert "1 reservation " in text
     assert "0 cancelled" in text
+    row = html[html.index("09:00 to 12:00") - 300 : html.index("Jana Smyslena")]
+    assert "background:#fffbeb" in row
+
+
+def test_requested_reservations_are_counted_first_as_waiting_for_approval() -> None:
+    reservations = [
+        reservation("2026-10-19T09:00", "2026-10-19T10:00", status=ReservationStatus.REQUESTED),
+        reservation("2026-10-20T09:00", "2026-10-20T10:00", status=ReservationStatus.REQUESTED),
+        reservation("2026-10-21T09:00", "2026-10-21T10:00"),
+    ]
+
+    html = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html
+    text = visible_text(html)
+
+    assert text.index("2 waiting for your approval") < text.index("3 reservations")
+    tile = html[html.index(">2</strong>") - 300 : html.index("waiting for your approval")]
+    assert "background:#fffbeb" in tile
+
+
+def test_no_waiting_count_without_requested_reservations() -> None:
+    reservations = [reservation("2026-10-19T09:00", "2026-10-19T10:00")]
+
+    brief = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT)
+
+    assert "waiting for your approval" not in brief.html
+    assert "waiting for your approval" not in brief.text
 
 
 def test_a_reservation_that_ends_on_a_later_day_shows_its_end_day() -> None:
@@ -270,13 +297,13 @@ Weekly brief for Hana Testova
 Test Electron Microscope
 TEST-SEM - Monday 19. 10. to Sunday 25. 10. 2026
 
-2 reservations, 22.5 h booked, 2 users, 1 without an experiment plan, 1 cancelled
+1 waiting for your approval, 2 reservations, 22.5 h booked, 2 users, 1 without an experiment plan, 1 cancelled
 
 MONDAY 19. 10.
   No reservations
 
 TUESDAY 20. 10.
-  [Requested] 09:00 to 09:30 (30 min)
+  [Requested: needs your approval] 09:00 to 09:30 (30 min)
     Karel Neexistujici, 2026-000001/RG-1-01
     No experiment plan given
   15:00 to Wed 13:00 (22 h)

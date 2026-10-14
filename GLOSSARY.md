@@ -39,6 +39,7 @@ _Avoid_: Alert, warning, AI summary, insight
 
 **Reservation**:
 A booked time slot on an instrument for a user and a project.
+Its status is reserved (the normal case, "Rezervováno" in the booking system), requested, or cancelled.
 _Avoid_: Booking, appointment, session
 
 **Certificate**:
@@ -62,6 +63,7 @@ _Avoid_: Private description, internal note
 **Requested reservation**:
 A reservation waiting for the guarantor to approve it, so it may not happen.
 The booking system calls it "Požadováno" (Requested), statuscode 1.
+A brief highlights it and counts it as "waiting for your approval", because the guarantor has to act on it.
 _Avoid_: Tentative, pending, unconfirmed
 
 **Cancelled reservation**:

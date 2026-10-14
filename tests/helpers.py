@@ -17,7 +17,7 @@ def reservation(
     project_code: str = "2026-000001/RG-1-01",
     experiment_plan: str = "Imaging of samples",
     id: str | None = None,
-    status: ReservationStatus = ReservationStatus.BOOKED,
+    status: ReservationStatus = ReservationStatus.RESERVED,
     note: str = "",
     private_note: str = "",
 ) -> Reservation:
