@@ -1,6 +1,8 @@
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from nano_standup.brief import build_brief
 from nano_standup.domain import Week
 
@@ -19,7 +21,7 @@ def test_subject_and_heading_name_the_instrument_and_the_week() -> None:
     assert "TEST-SEM - Monday 19. 10. to Sunday 25. 10. 2026" in text
 
 
-def test_counts_show_reservations_hours_users_and_reservations_without_a_plan() -> None:
+def test_counts_show_reservations_hours_users_and_reservations_without_an_experiment_plan() -> None:
     reservations = [
         reservation("2026-10-19T09:00", "2026-10-19T12:00", user_name="Petr Vymysleny"),
         reservation("2026-10-20T13:00", "2026-10-20T14:30", user_name="Jana Smyslena", experiment_plan=""),
@@ -31,7 +33,7 @@ def test_counts_show_reservations_hours_users_and_reservations_without_a_plan() 
     assert "3 reservations" in text
     assert "6.5 h booked" in text
     assert "2 users" in text
-    assert "2 without a plan" in text
+    assert "2 without an experiment plan" in text
 
 
 def test_counts_use_singular_words_and_whole_hours() -> None:
@@ -54,7 +56,7 @@ def test_reservations_are_grouped_by_day_in_time_order() -> None:
 
     text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
 
-    monday = text.index("Monday 19. 10.", text.index("without a plan"))
+    monday = text.index("Monday 19. 10.", text.index("without an experiment plan"))
     first = text.index("08:30-11:00 Petr Vymysleny 2026-123456/RG-1-01 Imaging of samples")
     second = text.index("14:00-16:00 Karel Neexistujici")
     wednesday = text.index("Wednesday 21. 10.")
@@ -67,7 +69,7 @@ def test_a_reservation_without_an_experiment_plan_says_so() -> None:
 
     text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
 
-    assert "09:00-10:00 Jana Smyslena 2026-000001/RG-1-01 No plan given" in text
+    assert "09:00-10:00 Jana Smyslena 2026-000001/RG-1-01 No experiment plan given" in text
 
 
 def test_footer_shows_the_build_time() -> None:
@@ -102,3 +104,8 @@ def test_users_without_an_id_still_count_once_per_name() -> None:
     text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
 
     assert "2 users" in text
+
+
+def test_a_build_time_without_a_time_zone_is_refused() -> None:
+    with pytest.raises(ValueError, match="built_at must carry a time zone, got 2026-10-19T08:00:00"):
+        build_brief(INSTRUMENT, WEEK, [], datetime(2026, 10, 19, 8, 0))

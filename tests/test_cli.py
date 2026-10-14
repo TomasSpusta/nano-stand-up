@@ -3,10 +3,10 @@ from pathlib import Path
 from nano_standup.cli import main
 from nano_standup.subscriptions import Subscription, SubscriptionStore
 
-from fake_booking_api import equipment, owner
+from fake_booking_api import guarantor_json, instrument_json
 from local_booking_server import API_KEY, local_booking_server
 
-SEM = equipment("equip-sem", "TEST-SEM", "Test Electron Microscope", "Testovaci mikroskop", owner("Hana", "Testova", "hana.testova@example.org"))
+SEM = instrument_json("equip-sem", "TEST-SEM", "Test Electron Microscope", "Testovaci mikroskop", guarantor_json("Hana", "Testova", "hana.testova@example.org"))
 
 
 def write_config(tmp_path: Path, booking_url: str) -> Path:

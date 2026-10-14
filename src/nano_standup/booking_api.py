@@ -92,15 +92,15 @@ class ApiBookingSource:
                 raise InstrumentNotFound(f"No instrument with id {instrument_id!r} in the booking system") from error
             raise
         alias = item.get("ge_alias") or ""
-        owner = item.get("ge_ownerid") or {}
-        email = (owner.get("internalemailaddress") or "").strip()
+        guarantor_json = item.get("ge_ownerid") or {}
+        email = (guarantor_json.get("internalemailaddress") or "").strip()
         if not email:
             raise BookingDataError(f"Instrument {alias} ({instrument_id}) has no guarantor email in the booking system")
         return Instrument(
             id=item["id"],
             name=item.get("ge_nameen") or item.get("name") or alias,
             alias=alias,
-            guarantor=Guarantor(name=_person_name(owner) or owner.get("fullname") or "", email=email),
+            guarantor=Guarantor(name=_person_name(guarantor_json) or guarantor_json.get("fullname") or "", email=email),
         )
 
     def get_reservations(self, instrument_id: str, week: Week) -> list[Reservation]:

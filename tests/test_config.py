@@ -61,3 +61,15 @@ def test_a_bad_port_is_named(tmp_path: Path) -> None:
 def test_a_missing_file_is_named(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="nope.env"):
         load_settings(tmp_path / "nope.env", environ={})
+
+
+def test_a_bad_starttls_value_is_named(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="SMTP_STARTTLS must be true or false, got 'yes'"):
+        load_settings(write(tmp_path, FULL + "SMTP_STARTTLS=yes\n"), environ={})
+
+
+def test_a_line_without_an_equals_sign_is_named(tmp_path: Path) -> None:
+    path = write(tmp_path, "# comment\nSMTP_HOST localhost\n")
+
+    with pytest.raises(ConfigError, match=r"\.env: line 2 has no '='"):
+        load_settings(path, environ={})

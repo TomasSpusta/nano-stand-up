@@ -13,16 +13,16 @@ API_KEY = "test-key"
 
 
 class LocalBookingServer:
-    def __init__(self, equipment: dict[str, Any]) -> None:  # Any: mirrors the API's JSON.
-        self.equipment = equipment
+    def __init__(self, instruments: dict[str, Any]) -> None:  # Any: mirrors the API's JSON.
+        self.instruments = instruments
         self.logins = 0
         self.queries: list[dict[str, list[str]]] = []
         self.url = ""
 
 
 @contextmanager
-def local_booking_server(equipment: dict[str, Any]) -> Iterator[LocalBookingServer]:  # Any: mirrors the API's JSON.
-    state = LocalBookingServer(equipment)
+def local_booking_server(instruments: dict[str, Any]) -> Iterator[LocalBookingServer]:  # Any: mirrors the API's JSON.
+    state = LocalBookingServer(instruments)
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: Any) -> None:  # Any: matches the base class.
@@ -50,7 +50,7 @@ def local_booking_server(equipment: dict[str, Any]) -> Iterator[LocalBookingServ
                 return
             url = urlsplit(self.path)
             state.queries.append(parse_qs(url.query))
-            item = state.equipment.get(url.path.removeprefix("/api/equipment/"))
+            item = state.instruments.get(url.path.removeprefix("/api/equipment/"))
             if item is None:
                 self._reply(404, {"error": "Not Found"})
             else:

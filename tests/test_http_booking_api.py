@@ -2,10 +2,10 @@ import pytest
 
 from nano_standup.booking_api import BookingApiError, HttpBookingApi
 
-from fake_booking_api import equipment, owner
+from fake_booking_api import guarantor_json, instrument_json
 from local_booking_server import API_KEY, local_booking_server
 
-SEM = equipment("equip-sem", "TEST-SEM", "Test Electron Microscope", "Testovaci mikroskop", owner("Hana", "Testova", "hana.testova@example.org"))
+SEM = instrument_json("equip-sem", "TEST-SEM", "Test Electron Microscope", "Testovaci mikroskop", guarantor_json("Hana", "Testova", "hana.testova@example.org"))
 
 
 def test_logs_in_once_and_sends_list_filters_as_repeated_parameters() -> None:

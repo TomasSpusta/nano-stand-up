@@ -51,7 +51,7 @@ def _counts_html(reservations: list[Reservation]) -> str:
         (str(len(reservations)), _plural(len(reservations), "reservation")),
         (f"{_number(hours)} h", "booked"),
         (str(users), _plural(users, "user")),
-        (str(without_experiment_plan), "without a plan"),
+        (str(without_experiment_plan), "without an experiment plan"),
     ]
     # Inline blocks wrap onto a new line on a narrow screen. Outlook shows them inline, which still reads well.
     boxes = "".join(
@@ -79,7 +79,7 @@ def _days_html(week: Week, reservations: list[Reservation]) -> str:
 
 def _row_html(reservation: Reservation) -> str:
     experiment_plan = reservation.experiment_plan.strip()
-    experiment_plan_html = _esc(experiment_plan) if experiment_plan else '<span style="color:#b45309;font-style:italic;">No plan given</span>'
+    experiment_plan_html = _esc(experiment_plan) if experiment_plan else '<span style="color:#b45309;font-style:italic;">No experiment plan given</span>'
     return f"""
           <tr>
             <td style="width:96px;padding:10px 12px 10px 0;vertical-align:top;white-space:nowrap;"><strong>{reservation.start:%H:%M}-{reservation.end:%H:%M}</strong></td>

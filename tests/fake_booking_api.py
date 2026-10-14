@@ -12,13 +12,13 @@ LIST_SCOPES_THAT_FAIL = {"ge_realised_for_contactid"}
 
 class FakeBookingApi:
     def __init__(self) -> None:
-        self.equipment: dict[str, dict[str, Any]] = {}  # Any: mirrors the API's JSON.
+        self.instruments: dict[str, dict[str, Any]] = {}  # Any: mirrors the API's JSON.
         self.reservations: list[dict[str, Any]] = []  # Any: mirrors the API's JSON.
         self.recordings: list[dict[str, Any]] = []  # Any: mirrors the API's JSON.
 
     def get(self, path: str, params: Params) -> Any:  # Any: mirrors the JSON shape of the real API.
         if path.startswith("/api/equipment/"):
-            item = self.equipment.get(path.removeprefix("/api/equipment/"))
+            item = self.instruments.get(path.removeprefix("/api/equipment/"))
             if item is None:
                 raise BookingApiError(path, 404, "Not Found")
             return item
@@ -61,11 +61,11 @@ def _matches(item: dict[str, Any], filters: list[str], time_field: str) -> bool:
     return True
 
 
-def equipment(id: str, alias: str, name_en: str | None, name_cz: str, owner: dict[str, Any] | None) -> dict[str, Any]:  # Any: mirrors the API's JSON.
-    return {"id": id, "ge_alias": alias, "ge_nameen": name_en, "name": name_cz, "ge_ownerid": owner}
+def instrument_json(id: str, alias: str, name_en: str | None, name_cz: str, guarantor: dict[str, Any] | None) -> dict[str, Any]:  # Any: mirrors the API's JSON.
+    return {"id": id, "ge_alias": alias, "ge_nameen": name_en, "name": name_cz, "ge_ownerid": guarantor}
 
 
-def owner(firstname: str, lastname: str, email: str | None) -> dict[str, Any]:  # Any: mirrors the API's JSON.
+def guarantor_json(firstname: str, lastname: str, email: str | None) -> dict[str, Any]:  # Any: mirrors the API's JSON.
     return {
         "id": f"sysuser-{lastname}",
         "firstname": firstname,
@@ -75,9 +75,9 @@ def owner(firstname: str, lastname: str, email: str | None) -> dict[str, Any]:  
     }
 
 
-def service_appointment(
+def reservation_json(
     id: str,
-    equipment_id: str,
+    instrument_id: str,
     start: str,
     end: str,
     subject: str = "2026-000001/RG-1-01",
@@ -91,7 +91,7 @@ def service_appointment(
         "scheduledend": end,
         "activity_parties": [
             {"partyid": {"id": f"contact-{firstname}"}, "participationtypemask": 5},
-            {"partyid": {"id": equipment_id}, "participationtypemask": 10},
+            {"partyid": {"id": instrument_id}, "participationtypemask": 10},
         ],
         "ge_realised_for_contactid": {"id": f"contact-{firstname}-{lastname}", "firstname": firstname, "lastname": lastname},
     }
