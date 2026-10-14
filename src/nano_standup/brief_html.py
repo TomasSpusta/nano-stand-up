@@ -28,7 +28,7 @@ NOTE_TEXT = "#444444"
 AMBER_TEXT = "#b45309"
 AMBER_BACKGROUND = "#fffbeb"
 RED_TEXT = "#b91c1c"
-# A cancelled reservation's text. Its mark is not crossed out, so it stays easy to read.
+# A cancelled reservation's text. Its colour replaces the block's own colour. The mark is not crossed out, so it stays easy to read.
 CROSSED_OUT = f"text-decoration:line-through;color:{FADED_TEXT};"
 
 

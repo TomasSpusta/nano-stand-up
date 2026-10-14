@@ -52,7 +52,7 @@ class Row:
 
     @property
     def notes(self) -> list[LabelledNote]:
-        """The note and the private note, in that order. An empty one is left out of the brief."""
+        """The note and the private note, in that order, even when empty. Each version of the brief leaves out an empty one."""
         return [LabelledNote("Note", self.note), LabelledNote("Private note", self.private_note)]
 
 
