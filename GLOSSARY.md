@@ -25,8 +25,9 @@ _Avoid_: Admin, operator, maintainer
 
 **Subscription**:
 A guarantor's confirmed request to get the brief for one instrument.
-It is active only after the guarantor clicks the confirm link sent to their booking-system email.
+It is active only after the guarantor opens the confirm link sent to their booking-system email and presses Confirm.
 It ends when that person is no longer the instrument's guarantor: the Monday job checks this before each brief.
+A new confirm link starts an ended subscription again.
 _Avoid_: Sign-up, registration, newsletter
 
 **Stop notice**:
