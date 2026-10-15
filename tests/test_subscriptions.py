@@ -8,7 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from nano_standup.subscriptions import CONFIRM_LINK_LIFETIME, ConfirmLinkProblem, Subscription, SubscriptionStore
+from nano_standup.subscriptions import (
+    CONFIRM_LINK_LIFETIME,
+    ConfirmLinkProblem,
+    Subscription,
+    SubscriptionStore,
+    UnsubscribeLinkProblem,
+)
 
 NOW = datetime(2026, 10, 14, 10, 0, tzinfo=UTC)
 SEM = "equip-sem"
@@ -35,6 +41,17 @@ CREATE TABLE IF NOT EXISTS confirm_link (
     email TEXT NOT NULL,
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
+    used_at TEXT
+)
+"""
+
+# The exact statement a database made before schema versions covered unsubscribe links used for that table.
+_UNVERSIONED_UNSUBSCRIBE_LINK_SCHEMA = """
+CREATE TABLE IF NOT EXISTS unsubscribe_link (
+    token_hash TEXT PRIMARY KEY,
+    instrument_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    created_at TEXT NOT NULL,
     used_at TEXT
 )
 """
@@ -198,6 +215,81 @@ def test_an_expired_request_is_not_recent(tmp_path: Path) -> None:
     assert not store.has_recent_request(SEM, since=NOW - timedelta(minutes=5), now=NOW + timedelta(minutes=2))
 
 
+# Unsubscribe
+
+
+def test_unsubscribing_ends_only_that_subscription(store: SubscriptionStore) -> None:
+    sem = store.add_active(SEM, EMAIL, NOW)
+    store.add_active(LAB, EMAIL, NOW)
+    store.add_active(SEM, "ota.zkusebni@example.org", NOW)
+    token = _unsubscribe_token(store, sem, NOW)
+
+    assert store.unsubscribe(token, NOW) == sem
+    assert store.list_active() == [Subscription(LAB, EMAIL), Subscription(SEM, "ota.zkusebni@example.org")]
+
+
+def test_unsubscribing_again_says_already_unsubscribed(store: SubscriptionStore) -> None:
+    token = _unsubscribe_token(store, store.add_active(SEM, EMAIL, NOW), NOW)
+    store.unsubscribe(token, NOW)
+
+    assert store.unsubscribe(token, NOW) is UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED
+
+
+def test_every_unsubscribe_link_of_a_subscription_works_until_one_is_used(store: SubscriptionStore) -> None:
+    sem = store.add_active(SEM, EMAIL, NOW)
+    # One link per brief: an old brief, read weeks later, still has a working link.
+    old = _unsubscribe_token(store, sem, NOW)
+    new = _unsubscribe_token(store, sem, NOW + timedelta(weeks=1))
+
+    assert old != new
+    assert store.check_unsubscribe(old) == sem
+    store.unsubscribe(new, NOW + timedelta(weeks=8))
+
+    assert store.check_unsubscribe(old) is UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED
+    assert store.unsubscribe(old, NOW) is UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED
+
+
+def test_an_unsubscribe_link_from_before_a_new_subscription_does_not_end_it(store: SubscriptionStore) -> None:
+    sem = store.add_active(SEM, EMAIL, NOW)
+    old = _unsubscribe_token(store, sem, NOW)
+    store.unsubscribe(_unsubscribe_token(store, sem, NOW), NOW)
+    store.add_active(SEM, EMAIL, NOW + timedelta(days=1))
+
+    assert store.unsubscribe(old, NOW + timedelta(days=2)) is UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED
+    assert store.list_active() == [sem]
+
+
+def test_checking_an_unsubscribe_link_does_not_use_it(store: SubscriptionStore) -> None:
+    sem = store.add_active(SEM, EMAIL, NOW)
+    token = _unsubscribe_token(store, sem, NOW)
+
+    assert store.check_unsubscribe(token) == sem
+    assert store.check_unsubscribe(token) == sem
+    assert store.list_active() == [sem]
+
+
+def test_an_unknown_unsubscribe_token_is_refused(store: SubscriptionStore) -> None:
+    store.add_active(SEM, EMAIL, NOW)
+
+    assert store.check_unsubscribe("no-such-token") is UnsubscribeLinkProblem.UNKNOWN
+    assert store.unsubscribe("no-such-token", NOW) is UnsubscribeLinkProblem.UNKNOWN
+    assert store.list_active() == [Subscription(SEM, EMAIL)]
+
+
+def test_unsubscribe_tokens_are_random_and_only_their_hash_is_kept(tmp_path: Path) -> None:
+    path = tmp_path / "standup.sqlite3"
+    store = SubscriptionStore(path)
+    sem = store.add_active(SEM, EMAIL, NOW)
+    tokens = {_unsubscribe_token(store, sem, NOW) for _ in range(20)}
+
+    with closing(sqlite3.connect(path)) as db:
+        dump = "\n".join(db.iterdump())
+
+    assert len(tokens) == 20
+    assert all(len(token) >= 43 for token in tokens)
+    assert not any(token in dump for token in tokens)
+
+
 def test_ending_a_subscription_because_the_guarantor_changed_stops_it_once(tmp_path: Path) -> None:
     store = SubscriptionStore(tmp_path / "standup.sqlite3")
     hana = store.add_active("instr-1", "hana.testova@example.org", NOW)
@@ -244,7 +336,7 @@ def test_a_database_from_before_ended_subscriptions_is_upgraded_and_keeps_its_su
         (1, "instr-1", "ended", "2026-10-01T06:00:00+00:00", "2026-10-14T10:00:00+00:00"),
         (2, "instr-2", "active", "2026-10-02T06:00:00+00:00", None),
     ]
-    assert _user_version(database) == _user_version(_new_database(tmp_path)) == 3
+    assert _user_version(database) == _user_version(_new_database(tmp_path)) == 4
     requested = store.request("instr-1", "hana.testova@example.org", NOW)
     assert store.confirm(requested.token, NOW) == Subscription("instr-1", "hana.testova@example.org")
 
@@ -264,7 +356,7 @@ def test_a_version_2_database_gains_confirm_links_and_keeps_its_subscriptions(tm
     store = SubscriptionStore(database)
 
     assert store.list_active() == [Subscription("instr-2", "ota.zkusebni@example.org")]
-    assert _user_version(database) == 3
+    assert _user_version(database) == 4
     assert _table_statements(database) == _table_statements(_new_database(tmp_path))
     requested = store.request("instr-1", "hana.testova@example.org", NOW)
     assert store.confirm(requested.token, NOW) == Subscription("instr-1", "hana.testova@example.org")
@@ -292,7 +384,7 @@ def test_a_version_0_database_that_has_confirm_links_keeps_them(tmp_path: Path) 
 
     store = SubscriptionStore(database)
 
-    assert _user_version(database) == 3
+    assert _user_version(database) == 4
     assert store.confirm(token, NOW) == Subscription(SEM, EMAIL)
     assert store.list_active() == [Subscription(SEM, EMAIL)]
 
@@ -316,6 +408,126 @@ def test_opening_an_up_to_date_database_needs_no_write_lock(tmp_path: Path) -> N
         other.rollback()
 
     assert store.list_active() == []
+
+
+def test_unsubscribing_ends_the_subscription_and_keeps_its_row_with_the_end_time(tmp_path: Path) -> None:
+    store = SubscriptionStore(tmp_path / "standup.sqlite3")
+    sem = store.add_active(SEM, EMAIL, NOW)
+
+    store.unsubscribe(_unsubscribe_token(store, sem, NOW), NOW + timedelta(days=3))
+
+    assert _status_and_end_time(tmp_path / "standup.sqlite3") == [("ended", "2026-10-17T10:00:00+00:00")]
+
+
+def test_an_ended_subscription_gets_no_unsubscribe_token(store: SubscriptionStore) -> None:
+    sem = store.add_active(SEM, EMAIL, NOW)
+    store.end_because_guarantor_changed(sem, NOW)
+
+    assert store.unsubscribe_token(sem, NOW) is None
+    assert store.unsubscribe_token(Subscription(LAB, EMAIL), NOW) is None
+
+
+def test_ending_because_the_guarantor_changed_uses_up_every_unsubscribe_link(store: SubscriptionStore) -> None:
+    sem = store.add_active(SEM, EMAIL, NOW)
+    lab = store.add_active(LAB, EMAIL, NOW)
+    old = _unsubscribe_token(store, sem, NOW)
+    new = _unsubscribe_token(store, sem, NOW + timedelta(weeks=1))
+    other = _unsubscribe_token(store, lab, NOW)
+
+    store.end_because_guarantor_changed(sem, NOW + timedelta(weeks=2))
+
+    for token in (old, new):
+        assert store.check_unsubscribe(token) is UnsubscribeLinkProblem.GUARANTOR_CHANGED
+        assert store.unsubscribe(token, NOW) is UnsubscribeLinkProblem.GUARANTOR_CHANGED
+    # Only that subscription's links.
+    assert store.check_unsubscribe(other) == lab
+
+
+def test_an_unsubscribe_link_from_before_the_guarantor_changed_does_not_end_a_new_subscription(
+    store: SubscriptionStore,
+) -> None:
+    sem = store.add_active(SEM, EMAIL, NOW)
+    old = _unsubscribe_token(store, sem, NOW)
+    store.end_because_guarantor_changed(sem, NOW + timedelta(weeks=1))
+    # The guarantor confirms again.
+    requested = store.request(SEM, EMAIL, NOW + timedelta(weeks=2))
+    store.confirm(requested.token, NOW + timedelta(weeks=2))
+
+    assert store.unsubscribe(old, NOW + timedelta(weeks=3)) is UnsubscribeLinkProblem.GUARANTOR_CHANGED
+    assert store.list_active() == [sem]
+
+
+def test_a_version_3_database_gains_unsubscribe_links_and_keeps_its_rows(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    with closing(sqlite3.connect(database)) as db, db:
+        db.execute(_SECOND_SCHEMA)
+        db.execute(_UNVERSIONED_CONFIRM_LINK_SCHEMA)
+        db.execute(
+            "INSERT INTO subscription (instrument_id, email, status, created_at, ended_at) VALUES"
+            " ('equip-sem', 'hana.testova@example.org', 'active', '2026-10-01T06:00:00+00:00', NULL)"
+        )
+        db.execute("PRAGMA user_version = 3")
+
+    store = SubscriptionStore(database)
+
+    assert _user_version(database) == 4
+    assert _table_statements(database) == _table_statements(_new_database(tmp_path))
+    sem = Subscription(SEM, EMAIL)
+    assert store.list_active() == [sem]
+    assert store.unsubscribe(_unsubscribe_token(store, sem, NOW), NOW) == sem
+
+
+def test_a_version_0_database_from_before_the_upgrade_steps_reaches_the_latest_version(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    with closing(sqlite3.connect(database)) as db, db:
+        db.execute(_FIRST_SCHEMA)
+        db.execute(
+            "INSERT INTO subscription (instrument_id, email, status, created_at)"
+            " VALUES ('equip-sem', 'hana.testova@example.org', 'active', '2026-10-01T06:00:00+00:00')"
+        )
+
+    store = SubscriptionStore(database)
+
+    assert _user_version(database) == 4
+    sem = Subscription(SEM, EMAIL)
+    assert store.unsubscribe(_unsubscribe_token(store, sem, NOW), NOW) == sem
+
+
+def test_a_version_0_database_that_has_unsubscribe_links_keeps_them(tmp_path: Path) -> None:
+    # Made before schema versions covered unsubscribe links: the first subscription table, a confirm_link table,
+    # and an unsubscribe_link table without end_reason.
+    database = tmp_path / "standup.sqlite3"
+    working = "a-link-sent-before-the-upgrade"
+    used = "a-link-used-before-the-upgrade"
+    with closing(sqlite3.connect(database)) as db, db:
+        db.execute(_FIRST_SCHEMA)
+        db.execute(_UNVERSIONED_CONFIRM_LINK_SCHEMA)
+        db.execute(_UNVERSIONED_UNSUBSCRIBE_LINK_SCHEMA)
+        db.execute(
+            "INSERT INTO subscription (instrument_id, email, status, created_at) VALUES (?, ?, 'active', ?)",
+            (SEM, EMAIL, NOW.isoformat()),
+        )
+        db.executemany(
+            "INSERT INTO unsubscribe_link (token_hash, instrument_id, email, created_at, used_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            [
+                (hashlib.sha256(working.encode()).hexdigest(), SEM, EMAIL, NOW.isoformat(), None),
+                (hashlib.sha256(used.encode()).hexdigest(), LAB, EMAIL, NOW.isoformat(), NOW.isoformat()),
+            ],
+        )
+
+    store = SubscriptionStore(database)
+
+    assert _user_version(database) == 4
+    assert store.check_unsubscribe(used) is UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED
+    assert store.unsubscribe(working, NOW) == Subscription(SEM, EMAIL)
+    assert store.check_unsubscribe(working) is UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED
+
+
+def _unsubscribe_token(store: SubscriptionStore, subscription: Subscription, now: datetime) -> str:
+    token = store.unsubscribe_token(subscription, now)
+    assert token is not None
+    return token
 
 
 def _status_and_end_time(database: Path) -> list[tuple[str, str | None]]:

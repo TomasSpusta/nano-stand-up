@@ -28,11 +28,13 @@ def build_brief(
     user_facts: Mapping[str, UserFacts],
     built_at: datetime,
     settings: HeadsUpSettings,
+    unsubscribe_link: str,
 ) -> Brief:
     """Build one brief.
 
     `user_facts` by user id, for the heads-up rules about users. A user without facts has no certificate.
     `built_at` must carry a time zone; the footer shows it in Prague time.
+    The footer ends with `unsubscribe_link`, which ends the subscription this brief goes to.
     """
-    content = brief_content(instrument, week, reservations, user_facts, built_at, settings)
+    content = brief_content(instrument, week, reservations, user_facts, built_at, settings, unsubscribe_link)
     return Brief(subject=content.subject, html=brief_html(content), text=brief_text(content))

@@ -1,6 +1,7 @@
 """Subscription request: a guarantor asks for an instrument's brief, and gets a confirm link by email.
 
 The link goes only to the guarantor email the booking system has for the instrument, never to the typed text.
+The unsubscribe link in each brief ends the subscription again.
 """
 
 import html
@@ -20,7 +21,7 @@ from nano_standup.domain import (
 from nano_standup.formatting import day_month_year, day_name
 from nano_standup.instrument_list import InstrumentListCache
 from nano_standup.mail import MailSender, Message
-from nano_standup.subscriptions import ConfirmLinkProblem, Subscription, SubscriptionStore
+from nano_standup.subscriptions import ConfirmLinkProblem, Subscription, SubscriptionStore, UnsubscribeLinkProblem
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +31,8 @@ CONFIRM_MAIL_GAP = timedelta(minutes=5)
 
 
 class SubscriptionRequests:
-    """Handles requests for subscriptions and their confirm links. Built once, with what every request needs."""
+    """Handles requests for subscriptions, their confirm links, and their unsubscribe links. Built once, with what
+    every request needs."""
 
     def __init__(
         self,
@@ -110,6 +112,17 @@ class SubscriptionRequests:
         if isinstance(confirmed, Subscription):
             log.info("Subscription confirmed: %s gets the brief for %s", confirmed.email, confirmed.instrument_id)
         return confirmed
+
+    def check_unsubscribe(self, token: str) -> Subscription | UnsubscribeLinkProblem:
+        """The subscription the unsubscribe link would end, or why it would not. Does not use the token."""
+        return self._store.check_unsubscribe(token)
+
+    def unsubscribe(self, token: str) -> Subscription | UnsubscribeLinkProblem:
+        """End the subscription the unsubscribe link is for and return it, or say why the link cannot end it."""
+        ended = self._store.unsubscribe(token, self._clock())
+        if isinstance(ended, Subscription):
+            log.info("Subscription ended: %s unsubscribed from the brief for %s", ended.email, ended.instrument_id)
+        return ended
 
 
 def _confirm_mail(instrument: Instrument, link: str, expires_at: datetime, from_address: str) -> Message:

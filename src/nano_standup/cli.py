@@ -1,6 +1,7 @@
 """Command line: wires the real modules together from the settings."""
 
 import argparse
+import functools
 import logging
 import os
 import sys
@@ -21,7 +22,7 @@ from nano_standup.sent_briefs import SentBriefStore
 from nano_standup.service_admin import add_subscription
 from nano_standup.subscription_request import SubscriptionRequests
 from nano_standup.subscriptions import SubscriptionStore
-from nano_standup.web import create_app
+from nano_standup.web import create_app, unsubscribe_link_for
 
 log = logging.getLogger("nano_standup")
 
@@ -84,6 +85,7 @@ def _add_subscription(settings: Settings, instrument_id: str, email: str, clock:
 
 
 def _run_monday_job(settings: Settings, clock: Clock, sleep: Sleep) -> int:
+    public_base_url = _public_base_url(settings, "the Monday job needs for the unsubscribe links in the briefs")
     subscriptions = _store(settings)
     database = settings.database_path
     with run_lock(database.with_name(f"{database.name}.monday-job.lock")):
@@ -97,25 +99,32 @@ def _run_monday_job(settings: Settings, clock: Clock, sleep: Sleep) -> int:
             from_address=settings.mail_from,
             service_admin_email=settings.service_admin_email,
             heads_up_settings=settings.heads_up,
+            unsubscribe_link_for=functools.partial(unsubscribe_link_for, public_base_url),
         )
     return EXIT_BRIEFS_NOT_SENT if result.failed or result.not_recorded or result.stop_notices_not_sent else 0
 
 
 def _serve(settings: Settings, clock: Clock) -> int:
-    if settings.public_base_url is None:
-        raise ConfigError("Missing setting PUBLIC_BASE_URL, which the web app needs for its confirm links")
+    public_base_url = _public_base_url(settings, "the web app needs for its confirm links")
     requests = SubscriptionRequests(
         source=_booking_source(settings),
         store=_store(settings),
         mail_sender=SmtpMailSender(settings.smtp),
         clock=clock,
         from_address=settings.mail_from,
-        public_base_url=settings.public_base_url,
+        public_base_url=public_base_url,
     )
     app = create_app(requests)
-    # No access log: it writes each full URL, and a confirm link's URL holds its token. The app logs what matters.
+    # No access log: it writes each full URL, and a confirm or unsubscribe link's URL holds its token.
+    # The app logs what matters.
     uvicorn.run(app, host=settings.web_host, port=settings.web_port, access_log=False)
     return 0
+
+
+def _public_base_url(settings: Settings, needed_for: str) -> str:
+    if settings.public_base_url is None:
+        raise ConfigError(f"Missing setting PUBLIC_BASE_URL, which {needed_for}")
+    return settings.public_base_url
 
 
 def _booking_source(settings: Settings) -> ApiBookingSource:

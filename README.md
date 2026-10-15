@@ -74,6 +74,7 @@ uv run nano-standup run-monday-job
 ```
 
 Read them at http://localhost:8025.
+The Monday job needs `PUBLIC_BASE_URL` too (see below), because each brief has an unsubscribe link that starts with it.
 
 The server timer starts the Monday job once, at 08:00 Prague time.
 
@@ -123,8 +124,19 @@ The subscription starts when they open the link and press Confirm, if the email 
 Opening the link alone does not use it, because mail scanners open links too.
 A subscription that ended because the guarantor changed starts again the same way.
 
+Each brief ends with an unsubscribe link for its subscription.
+Opening it shows an Unsubscribe button, and pressing it ends that subscription only.
+The guarantor's other subscriptions keep going.
+Each brief gets a new link, and every link of a subscription works until the subscription ends, with no time limit.
+A brief sent again on a retry gets a new link too.
+When the subscription ends, in either way, all its links stop working, so an old link never ends a later subscription to the same instrument.
+An old link then says "Already unsubscribed"; after a guarantor change it also says that the booking system no longer lists the email as the guarantor, without saying who the guarantor is now.
+Unsubscribing keeps the ended subscription in the database, as a guarantor change does.
+The stop notice has no unsubscribe link, because its subscription has already ended.
+The brief also carries the `List-Unsubscribe` and `List-Unsubscribe-Post` mail headers (RFC 8058), so mail apps can show their own unsubscribe button.
+
 Set `PUBLIC_BASE_URL` in `.env` to the address the page is opened at, for example `http://localhost:8000` when testing.
-Confirm links start with it.
+Confirm and unsubscribe links start with it.
 `WEB_HOST` and `WEB_PORT` (default 127.0.0.1 and 8000) set where the app listens.
 In production it runs behind an HTTPS proxy.
 
