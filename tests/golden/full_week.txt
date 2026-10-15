@@ -12,16 +12,22 @@ HEADS-UP
     Mon 19. 10. from Sun 22:00 to 06:00, Jana Smyslena
     Tue 20. 10. 15:00 to Wed 13:00, Karel Neexistujici
     Sat 24. 10. 10:00 to Mon 2. 11. 10:00, Petr Vymysleny
+  New user
+    Mon 19. 10. 08:30 to 11:00, Petr Vymysleny (no. 2)
+    Sat 24. 10. 10:00 to Mon 2. 11. 10:00, Petr Vymysleny (no. 3)
+  No valid certificate
+    Tue 20. 10. 15:00 to Wed 13:00, Karel Neexistujici (expired 31. 5. 2026)
+    Thu 22. 10. 09:00 to 12:00, Lenka Vymyslena (missing)
   Cancelled
     Wed 21. 10. 09:00 to 10:00, Eva <Testova>
 
-2 waiting for your approval, 5 reservations, 69.2 h booked, 3 users, 1 without an experiment plan, 1 cancelled
+2 waiting for your approval, 7 reservations, 73.2 h booked, 5 users, 1 without an experiment plan, 1 cancelled
 
 MONDAY 19. 10.
   from Sun 22:00 to 06:00 (8 h)
     Jana Smyslena, 2026-000001/RG-1-01
     Overnight EDS mapping
-  08:30 to 11:00 (2.5 h)
+  [New user, no. 2] 08:30 to 11:00 (2.5 h)
     Petr Vymysleny, 2026-000001/RG-1-01
     Imaging of samples
     Note: Bring own holder
@@ -32,7 +38,7 @@ MONDAY 19. 10.
     Check the invoice
 
 TUESDAY 20. 10.
-  [Requested: needs your approval] 15:00 to Wed 13:00 (22 h)
+  [Requested: needs your approval] [No valid certificate] 15:00 to Wed 13:00 (22 h)
     Karel Neexistujici, 2026-000001/RG-1-01
     Imaging of samples
 
@@ -42,13 +48,17 @@ WEDNESDAY 21. 10.
     Imaging of samples
 
 THURSDAY 22. 10.
-  No reservations
+  [No valid certificate] 09:00 to 12:00 (3 h)
+    Lenka Vymyslena, 2026-000001/RG-1-01
+    Imaging of samples
 
 FRIDAY 23. 10.
-  No reservations
+  09:00 to 10:00 (1 h)
+    Hana Testova, 2026-000001/RG-1-01
+    Imaging of samples
 
 SATURDAY 24. 10.
-  [Requested: needs your approval] 10:00 to Mon 2. 11. 10:00 (216 h)
+  [Requested: needs your approval] [New user, no. 3] 10:00 to Mon 2. 11. 10:00 (216 h)
     Petr Vymysleny, 2026-000001/RG-1-01
     Imaging of samples
 

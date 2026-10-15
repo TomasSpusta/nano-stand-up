@@ -9,7 +9,7 @@ from httpx import Response
 
 from nano_standup.booking_api import BookingApiError
 from nano_standup.booking_source import BookingSource, FakeBookingSource, InstrumentNotFound
-from nano_standup.domain import Guarantor, Instrument, InstrumentName, Reservation, Week
+from nano_standup.domain import Guarantor, Instrument, InstrumentName, Reservation, UserFacts, Week
 from nano_standup.mail import InMemoryMailSender, MailSender, Message
 from nano_standup.subscription_request import CONFIRM_MAIL_GAP, SubscriptionRequests
 from nano_standup.subscriptions import CONFIRM_LINK_LIFETIME, Subscription, SubscriptionStore
@@ -24,7 +24,7 @@ OTHER = Instrument(
     id="instr-2",
     name="Test <Chemical> Laboratory",
     alias="TEST-LAB",
-    guarantor=Guarantor(name="Ota Zkusebni", email="ota.zkusebni@example.org"),
+    guarantor=Guarantor(name="Ota Zkusebni", email="ota.zkusebni@example.org", user_id="user-Ota Zkusebni"),
 )
 CONFIRM_LINK = re.compile(re.escape(BASE_URL) + r"/confirm\?token=([A-Za-z0-9_-]+)")
 
@@ -72,6 +72,7 @@ class Site:
     def unsubscribe_link(self, subscription: Subscription) -> str:
         """The unsubscribe link a brief of the subscription has, without the base URL."""
         token = self.store.unsubscribe_token(subscription, self.clock())
+        assert token is not None, "an active subscription gets a token"
         return unsubscribe_link_for(BASE_URL, token).removeprefix(BASE_URL)
 
     def press_button(self, link: str) -> Response:
@@ -118,6 +119,9 @@ class DownBookingSource:
 
     def get_reservations(self, instrument_id: str, week: Week) -> list[Reservation]:
         raise BookingApiError("/api/service-appointment", None, "Connection refused")
+
+    def get_user_facts(self, instrument_id: str, user_id: str) -> UserFacts:
+        raise BookingApiError("/api/session", None, "Connection refused")
 
 
 class ChangingSource(FakeBookingSource):
@@ -192,7 +196,9 @@ def test_a_matching_email_gets_a_confirm_mail_at_the_booking_system_email(site: 
 
 
 def test_the_confirm_mail_goes_to_the_booking_system_email_not_the_typed_text(tmp_path: Path) -> None:
-    instrument = Instrument("instr-3", "Test Mill", "TEST-MILL", Guarantor("Eva Pokusna", "Eva.Pokusna@Example.org"))
+    instrument = Instrument(
+        "instr-3", "Test Mill", "TEST-MILL", Guarantor("Eva Pokusna", "Eva.Pokusna@Example.org", "user-Eva Pokusna")
+    )
     site = Site(tmp_path, FakeBookingSource([instrument]))
 
     site.subscribe(instrument.id, "eva.pokusna@example.org")
@@ -404,7 +410,7 @@ def test_pressing_confirm_works_when_the_guarantor_email_changed_only_its_case(t
     source = ChangingSource()
     site = Site(tmp_path, source)
     site.subscribe(INSTRUMENT.id, GUARANTOR.email)
-    source.guarantor = Guarantor(GUARANTOR.name, " " + GUARANTOR.email.upper())
+    source.guarantor = Guarantor(GUARANTOR.name, " " + GUARANTOR.email.upper(), GUARANTOR.user_id)
 
     response = site.press_button(site.confirm_link())
 
@@ -479,6 +485,26 @@ def test_the_unsubscribe_link_of_an_older_brief_says_already_unsubscribed(site: 
     response = site.client.get(older)
 
     assert "Already unsubscribed" in visible_text(response.text)
+
+
+def test_the_unsubscribe_link_after_the_guarantor_changed_says_already_unsubscribed_and_why(site: Site) -> None:
+    sem = site.store.add_active(INSTRUMENT.id, GUARANTOR.email, NOW)
+    link = site.unsubscribe_link(sem)
+    # The Monday job ended it: the booking system has another guarantor email for the instrument now.
+    site.store.end_because_guarantor_changed(sem, NOW)
+
+    opened = site.client.get(link)
+    pressed = site.client.post("/unsubscribe", data={"token": link.partition("token=")[2]})
+
+    for response in (opened, pressed):
+        assert response.status_code == 200
+        text = visible_text(response.text)
+        assert "Already unsubscribed" in text
+        assert "no longer lists this email address as the instrument's guarantor" in text
+        assert "<form" not in response.text
+        # It never says who the guarantor is now, or whose subscription it was.
+        assert "@" not in text
+        assert INSTRUMENT.guarantor.name not in text
 
 
 def test_a_mail_app_can_unsubscribe_with_one_click(site: Site) -> None:

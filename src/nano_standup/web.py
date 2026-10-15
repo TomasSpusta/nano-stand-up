@@ -41,7 +41,7 @@ def link_problem_status(problem: ConfirmLinkProblem | UnsubscribeLinkProblem) ->
             return 410
         case ConfirmLinkProblem.UNKNOWN | UnsubscribeLinkProblem.UNKNOWN:
             return 404
-        case UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED:
+        case UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED | UnsubscribeLinkProblem.GUARANTOR_CHANGED:
             # A normal answer, not an error: the guarantor gets what they asked for.
             return 200
         case _:

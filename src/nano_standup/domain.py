@@ -6,21 +6,16 @@ from datetime import date, datetime, time, timedelta
 from enum import Enum
 from zoneinfo import ZoneInfo
 
+from nano_standup.formatting import day_name
+
 # The booking system and the guarantors work in Prague time.
 PRAGUE = ZoneInfo("Europe/Prague")
 
 # Gives the current time with a time zone. Passed in from outside, so tests can fix the time.
 Clock = Callable[[], datetime]
 
-# Day names written out, because `%A` and `%a` follow the server's time language.
-DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 # Saturday and Sunday, as date.weekday() gives them.
 WEEKEND = {5, 6}
-
-
-def day_name(day: date) -> str:
-    """English day name, such as "Tuesday", on any server time language."""
-    return DAY_NAMES[day.weekday()]
 
 
 def normalize_email(email: str) -> str:
@@ -32,6 +27,8 @@ def normalize_email(email: str) -> str:
 class Guarantor:
     name: str
     email: str
+    # The guarantor as a user of instruments, as in Reservation.user_id. None when the booking system has none.
+    user_id: str | None
 
 
 @dataclass(frozen=True)
@@ -46,14 +43,18 @@ class Instrument:
         """Alias and id, for log and error messages."""
         return f"{self.alias} ({self.id})"
 
+    def has_guarantor_email(self, email: str) -> bool:
+        """True when `email` is the guarantor email, ignoring case and surrounding spaces. Names are never compared."""
+        return normalize_email(email) == normalize_email(self.guarantor.email)
+
 
 class NotTheGuarantor(ValueError):
     pass
 
 
 def require_guarantor(instrument: Instrument, email: str) -> None:
-    """Raise NotTheGuarantor unless `email` is the instrument's guarantor email. Names are never compared."""
-    if normalize_email(email) != normalize_email(instrument.guarantor.email):
+    """Raise NotTheGuarantor unless `email` is the instrument's guarantor email."""
+    if not instrument.has_guarantor_email(email):
         raise NotTheGuarantor(
             f"{email.strip()!r} is not the guarantor email of {instrument.label} in the booking system"
         )
@@ -98,14 +99,40 @@ class Reservation:
         return self.end - self.start
 
     @property
-    def is_not_cancelled(self) -> bool:
-        """Reserved or requested. A requested reservation may not happen, but it still counts."""
-        return self.status is not ReservationStatus.CANCELLED
+    def is_cancelled(self) -> bool:
+        """A requested reservation is not cancelled: it may not happen, but it still counts."""
+        return self.status is ReservationStatus.CANCELLED
 
     @property
     def is_missing_experiment_plan(self) -> bool:
         """Not cancelled and with no experiment plan. A cancelled reservation needs no experiment plan."""
-        return self.is_not_cancelled and not self.experiment_plan.strip()
+        return not self.is_cancelled and not self.experiment_plan.strip()
+
+
+@dataclass(frozen=True)
+class Certificate:
+    """A user's permission to use one instrument on their own, from one day to another, both days included."""
+
+    valid_from: date
+    # None when it does not end.
+    valid_to: date | None
+
+    def covers(self, moment: datetime) -> bool:
+        day = moment.date()
+        return self.valid_from <= day and (self.valid_to is None or day <= self.valid_to)
+
+
+@dataclass(frozen=True)
+class UserFacts:
+    """What the booking system knows about one user on one instrument. The heads-up rules about users read it."""
+
+    certificates: list[Certificate]
+    # When the user's reservations on the instrument start, from any time. Cancelled reservations are left out.
+    reservation_starts: list[datetime]
+
+
+# For a user the booking system has no facts about: no certificate and no reservations.
+NO_USER_FACTS = UserFacts(certificates=[], reservation_starts=[])
 
 
 @dataclass(frozen=True)

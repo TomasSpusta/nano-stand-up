@@ -1,6 +1,9 @@
 import dataclasses
+import smtplib
 
-from nano_standup.mail import Message, SmtpMailSender, SmtpSettings
+import pytest
+
+from nano_standup.mail import Message, RecipientRefused, SmtpMailSender, SmtpSettings
 
 from helpers import FakeSmtpServer
 
@@ -66,3 +69,18 @@ def test_a_message_without_an_unsubscribe_link_gets_no_unsubscribe_headers(smtp:
     [email] = smtp.connections[0].sent
     assert email["List-Unsubscribe"] is None
     assert email["List-Unsubscribe-Post"] is None
+
+
+def test_a_recipient_refused_for_good_raises_recipient_refused(smtp: FakeSmtpServer) -> None:
+    smtp.refusal = (550, b"5.1.1 No such user")
+
+    with pytest.raises(RecipientRefused, match="refused hana.testova@example.org: 550 5.1.1 No such user"):
+        SmtpMailSender(SmtpSettings(host="localhost", port=25)).send(MESSAGE)
+
+
+def test_a_recipient_refused_for_now_stays_an_smtp_error_worth_another_try(smtp: FakeSmtpServer) -> None:
+    # Such as greylisting: the mail server asks to try again later.
+    smtp.refusal = (451, b"4.7.1 Try again later")
+
+    with pytest.raises(smtplib.SMTPRecipientsRefused):
+        SmtpMailSender(SmtpSettings(host="localhost", port=25)).send(MESSAGE)

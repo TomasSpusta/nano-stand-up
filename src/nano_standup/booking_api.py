@@ -19,8 +19,13 @@ API quirks it hides:
     The few other hidden items are test records and lab items no one books.
   - True and false filter as 1 and 0, and a null matches neither.
 - A missing link to another record can come as an empty list instead of null.
+- A user's certificates hang on their system user, which their contact (the reservation's user) links to.
+  Their endpoint ignores page and limit and always gives the whole list, so it is read once, not page by page.
+- Sessions can be filtered by instrument and by user, though the API spec does not list these filters.
+  A session points to its reservation, so this gives a user's reservations on an instrument.
 """
 
+import http.client
 import json
 import logging
 import urllib.error
@@ -32,7 +37,16 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from nano_standup.booking_source import InstrumentNotFound
-from nano_standup.domain import Guarantor, Instrument, InstrumentName, Reservation, ReservationStatus, Week
+from nano_standup.domain import (
+    Certificate,
+    Guarantor,
+    Instrument,
+    InstrumentName,
+    Reservation,
+    ReservationStatus,
+    UserFacts,
+    Week,
+)
 
 log = logging.getLogger(__name__)
 
@@ -58,6 +72,7 @@ SUBSCRIBABLE_INSTRUMENT_FILTERS = [
 API_TIME = "%Y-%m-%dT%H:%M:%S"
 # A recording starts about when its reservation does. One day of margin each side is enough to find it.
 RECORDING_MARGIN = timedelta(days=1)
+LOGIN_PATH = "/api/login"
 
 
 class BookingApiError(RuntimeError):
@@ -73,6 +88,10 @@ class BookingDataError(RuntimeError):
     """The booking API returned data the service cannot use."""
 
 
+class BookingAccessDenied(RuntimeError):
+    """The booking API refused the API key access to an instrument (HTTP 403). A later try gets the same answer."""
+
+
 class BookingApi(Protocol):
     def get(self, path: str, params: Params) -> Any: ...  # Any: parsed JSON.
 
@@ -85,6 +104,18 @@ class HttpBookingApi:
         self._token: str | None = None
 
     def get(self, path: str, params: Params) -> Any:  # Any: parsed JSON.
+        """A 401 means the token expired, as it can during the Monday job retries: log in again once and repeat."""
+        try:
+            return self._get(path, params)
+        except BookingApiError as error:
+            # A 401 from the login itself means a wrong API key, which a second login does not fix.
+            if error.status != 401 or error.path == LOGIN_PATH:
+                raise
+            log.info("Booking API token refused for %s, logging in again", path)
+            self._token = None
+            return self._get(path, params)
+
+    def _get(self, path: str, params: Params) -> Any:  # Any: parsed JSON.
         query = urllib.parse.urlencode(params, doseq=True)
         request = urllib.request.Request(
             f"{self._base_url}{path}?{query}", headers={"Authorization": f"Bearer {self._login()}"}
@@ -94,11 +125,11 @@ class HttpBookingApi:
     def _login(self) -> str:
         if self._token is None:
             request = urllib.request.Request(
-                f"{self._base_url}/api/login",
+                f"{self._base_url}{LOGIN_PATH}",
                 data=json.dumps({"apiKey": self._api_key}).encode(),
                 headers={"Content-Type": "application/json"},
             )
-            self._token = str(_required(self._send("/api/login", request), "accessToken", "The answer to /api/login"))
+            self._token = str(_required(self._send(LOGIN_PATH, request), "accessToken", f"The answer to {LOGIN_PATH}"))
         return self._token
 
     def _send(self, path: str, request: urllib.request.Request) -> Any:  # Any: parsed JSON.
@@ -110,6 +141,12 @@ class HttpBookingApi:
         except (urllib.error.URLError, TimeoutError) as error:
             reason = error.reason if isinstance(error, urllib.error.URLError) else error
             raise BookingApiError(path, None, str(reason)) from error
+        except http.client.HTTPException as error:
+            # Such as an answer cut off before its end.
+            raise BookingApiError(path, None, repr(error)) from error
+        except ValueError as error:
+            # Such as a proxy's HTML error page instead of the API's JSON.
+            raise BookingApiError(path, None, f"the answer is not JSON: {error}") from error
 
 
 class ApiBookingSource:
@@ -133,17 +170,32 @@ class ApiBookingSource:
         except BookingApiError as error:
             if error.status == 404:
                 raise InstrumentNotFound(f"No instrument with id {instrument_id!r} in the booking system") from error
+            if error.status == 403:
+                raise BookingAccessDenied(
+                    f"No access to instrument {instrument_id!r} in the booking system: {error}"
+                ) from error
             raise
         alias = item.get("ge_alias") or ""
         guarantor_json = item.get("ge_ownerid") or {}
         email = (guarantor_json.get("internalemailaddress") or "").strip()
         if not email:
             raise BookingDataError(f"Instrument {alias} ({instrument_id}) has no guarantor email in the booking system")
+        # The guarantor's contact is their user id on reservations.
+        user_id = (guarantor_json.get("ge_contactid") or {}).get("id") or None
+        if user_id is None:
+            log.warning(
+                "The guarantor of instrument %s (%s) has no contact in the booking system; "
+                "their own reservations get the certificate heads-up",
+                alias,
+                instrument_id,
+            )
         return Instrument(
             id=_required(item, "id", f"Instrument {alias} ({instrument_id})"),
             name=_english_or_czech_name(item),
             alias=alias,
-            guarantor=Guarantor(name=_person_name(guarantor_json) or guarantor_json.get("fullname") or "", email=email),
+            guarantor=Guarantor(
+                name=_person_name(guarantor_json) or guarantor_json.get("fullname") or "", email=email, user_id=user_id
+            ),
         )
 
     def get_reservations(self, instrument_id: str, week: Week) -> list[Reservation]:
@@ -169,6 +221,50 @@ class ApiBookingSource:
         windows = [(week.start, week.end)] + [(start, start) for start in starts_before]
         experiment_plans = self._experiment_plans(windows)
         return [replace(r, experiment_plan=experiment_plans.get(r.id, "")) for r in reservations]
+
+    def get_user_facts(self, instrument_id: str, user_id: str) -> UserFacts:
+        return UserFacts(
+            certificates=self.get_certificates(instrument_id, user_id),
+            reservation_starts=self.get_reservation_starts(instrument_id, user_id),
+        )
+
+    def get_certificates(self, instrument_id: str, user_id: str) -> list[Certificate]:
+        """The user's certificates for the instrument, valid or not, through the system user of their contact."""
+        contact = self._api.get(f"/api/contact/{urllib.parse.quote(user_id)}", {})
+        system_user_id = (contact.get("ge_systemuserid") or {}).get("id")
+        if not system_user_id:
+            # Only a user who can log in to the booking system has a system user, and so a certificate.
+            return []
+        path = (
+            f"/api/system-user/{urllib.parse.quote(system_user_id)}"
+            f"/equipment/{urllib.parse.quote(instrument_id)}/certificates"
+        )
+        what = f"A certificate of user {user_id} for instrument {instrument_id}"
+        certificates = []
+        # One request: this endpoint ignores paging, so reading page after page would never end.
+        for item in self._api.get(path, {}):
+            if not item.get("ge_platnostod"):
+                log.warning("%s has no valid-from date; the heads-up rules leave it out", what)
+                continue
+            valid_to = _local_time(item, "ge_platnostdo", what).date() if item.get("ge_platnostdo") else None
+            certificates.append(Certificate(_local_time(item, "ge_platnostod", what).date(), valid_to))
+        return certificates
+
+    def get_reservation_starts(self, instrument_id: str, user_id: str) -> list[datetime]:
+        """When the user's reservations on the instrument start, from any time, without cancelled ones."""
+        filters = [f"ge_equipmentid:eq:{instrument_id}", f"ge_realised_for_contactid:eq:{user_id}"]
+        # By reservation id: a reservation with several sessions counts once.
+        starts: dict[str, datetime] = {}
+        for session in self._pages("/api/session", filters, scope="ge_serviceappointmentid"):
+            reservation = session.get("ge_serviceappointmentid")
+            if not reservation:
+                # Not booked through a reservation, so it is not one of the user's reservations.
+                continue
+            reservation_id = _required(reservation, "id", f"The reservation of session {session.get('id')}")
+            what = f"Reservation {reservation_id}"
+            if _status(reservation, what) is not ReservationStatus.CANCELLED:
+                starts[reservation_id] = _local_time(reservation, "scheduledstart", what)
+        return list(starts.values())
 
     def _experiment_plans(self, windows: list[tuple[datetime, datetime]]) -> dict[str, str]:
         """Experiment plan by reservation id, for the reservations that start inside one of the windows."""

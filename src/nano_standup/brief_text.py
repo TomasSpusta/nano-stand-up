@@ -40,13 +40,14 @@ def _heads_ups_text(heads_ups: list[HeadsUp]) -> list[str]:
 
 
 def _heads_up_item_text(item: HeadsUpItem) -> str:
-    return f"{item.day} {item.span.text()}, {item.user_name}"
+    detail = f" ({item.detail})" if item.detail else ""
+    return f"{item.day} {item.span.text()}, {item.user_name}{detail}"
 
 
 def _row_text(row: Row) -> list[str]:
-    mark = f"[{row.mark}] " if row.mark else ""
+    marks = "".join(f"[{mark}] " for mark in row.marks)
     lines = [
-        f"  {mark}{row.span.text()} ({row.length})",
+        f"  {marks}{row.span.text()} ({row.length})",
         f"    {', '.join(part for part in (row.user_name, row.project_code) if part)}",
         *_indented(row.experiment_plan or NO_EXPERIMENT_PLAN),
     ]

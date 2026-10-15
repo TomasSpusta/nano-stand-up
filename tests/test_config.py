@@ -5,6 +5,7 @@ import pytest
 
 from nano_standup.config import ConfigError, load_settings
 from nano_standup.domain import WorkingHours
+from nano_standup.heads_ups import HeadsUpSettings
 from nano_standup.mail import SmtpSettings
 
 FULL = """
@@ -14,6 +15,7 @@ BOOKING_API_KEY="test-key"
 SMTP_HOST=localhost
 SMTP_PORT=1025
 MAIL_FROM=standup@example.org
+SERVICE_ADMIN_EMAIL=service-admin@example.org
 DATABASE_PATH=data/standup.sqlite3
 """
 
@@ -31,9 +33,10 @@ def test_reads_all_settings_from_the_file(tmp_path: Path) -> None:
     assert settings.booking_api_key == "test-key"
     assert settings.smtp == SmtpSettings(host="localhost", port=1025, username=None, password=None, starttls=False)
     assert settings.mail_from == "standup@example.org"
+    assert settings.service_admin_email == "service-admin@example.org"
     assert settings.database_path == tmp_path / "data/standup.sqlite3"
     # Left out of the file, so the defaults.
-    assert settings.working_hours == WorkingHours(time(7, 0), time(19, 0))
+    assert settings.heads_up == HeadsUpSettings(WorkingHours(time(7, 0), time(19, 0)), new_user_reservations=3)
 
 
 def test_optional_smtp_login_and_starttls(tmp_path: Path) -> None:
@@ -50,6 +53,13 @@ def test_environment_wins_over_the_file(tmp_path: Path) -> None:
     settings = load_settings(write(tmp_path, FULL), environ={"SMTP_HOST": "mail.example.org"})
 
     assert settings.smtp.host == "mail.example.org"
+
+
+def test_a_missing_service_admin_email_is_named(tmp_path: Path) -> None:
+    text = FULL.replace("SERVICE_ADMIN_EMAIL=service-admin@example.org\n", "")
+
+    with pytest.raises(ConfigError, match="SERVICE_ADMIN_EMAIL"):
+        load_settings(write(tmp_path, text), environ={})
 
 
 def test_a_missing_setting_is_named(tmp_path: Path) -> None:
@@ -86,7 +96,7 @@ def test_working_hours_can_be_set(tmp_path: Path) -> None:
 
     settings = load_settings(write(tmp_path, text), environ={})
 
-    assert settings.working_hours == WorkingHours(time(8, 0), time(17, 30))
+    assert settings.heads_up.working_hours == WorkingHours(time(8, 0), time(17, 30))
 
 
 @pytest.mark.parametrize("value", ["7", "7:00:00", "25:00", "seven"])
@@ -128,3 +138,15 @@ def test_a_public_base_url_without_http_is_named(tmp_path: Path) -> None:
 def test_a_bad_web_port_is_named(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="WEB_PORT must be a number, got 'web'"):
         load_settings(write(tmp_path, FULL + "WEB_PORT=web\n"), environ={})
+
+
+def test_the_new_user_limit_can_be_set(tmp_path: Path) -> None:
+    settings = load_settings(write(tmp_path, FULL + "NEW_USER_RESERVATIONS=5\n"), environ={})
+
+    assert settings.heads_up.new_user_reservations == 5
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "three", "2.5", "²"])
+def test_a_bad_new_user_limit_is_named(tmp_path: Path, value: str) -> None:
+    with pytest.raises(ConfigError, match=f"NEW_USER_RESERVATIONS must be a whole number of 1 or more, got '{value}'"):
+        load_settings(write(tmp_path, FULL + f"NEW_USER_RESERVATIONS={value}\n"), environ={})

@@ -150,6 +150,14 @@ def _unsubscribe_problem_message(problem: UnsubscribeLinkProblem) -> tuple[str, 
                 "This subscription has already ended, so nothing changed. If you subscribed again since,"
                 " use the unsubscribe link in your latest brief.",
             )
+        case UnsubscribeLinkProblem.GUARANTOR_CHANGED:
+            # Never says who the guarantor is now.
+            return (
+                "Already unsubscribed",
+                "This subscription has already ended, so nothing changed: the booking system no longer lists this"
+                " email address as the instrument's guarantor. If you are still the guarantor, subscribe again with"
+                " the email address the booking system has for you.",
+            )
         case UnsubscribeLinkProblem.UNKNOWN:
             return (
                 "Link not valid",
