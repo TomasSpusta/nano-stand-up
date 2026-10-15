@@ -1,0 +1,127 @@
+import sqlite3
+from contextlib import closing
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from nano_standup.subscriptions import CONFIRM_LINK_LIFETIME, ConfirmOutcome, Subscription, SubscriptionStore
+
+NOW = datetime(2026, 10, 14, 10, 0, tzinfo=UTC)
+SEM = "equip-sem"
+LAB = "equip-lab"
+EMAIL = "hana.testova@example.org"
+
+
+@pytest.fixture
+def store(tmp_path: Path) -> SubscriptionStore:
+    return SubscriptionStore(tmp_path / "standup.sqlite3")
+
+
+def test_a_requested_subscription_is_not_active_before_it_is_confirmed(store: SubscriptionStore) -> None:
+    store.request(SEM, EMAIL, NOW)
+
+    assert store.list_active() == []
+
+
+def test_confirming_makes_the_subscription_active_with_the_normalized_email(store: SubscriptionStore) -> None:
+    pending = store.request(SEM, "  Hana.Testova@Example.org ", NOW)
+
+    result = store.confirm(pending.token, NOW + timedelta(minutes=5))
+
+    assert result.outcome is ConfirmOutcome.CONFIRMED
+    assert result.subscription == Subscription(SEM, EMAIL)
+    assert store.list_active() == [Subscription(SEM, EMAIL)]
+
+
+def test_the_confirm_link_expires_after_its_lifetime(store: SubscriptionStore) -> None:
+    pending = store.request(SEM, EMAIL, NOW)
+
+    assert pending.expires_at == NOW + CONFIRM_LINK_LIFETIME
+    result = store.confirm(pending.token, NOW + CONFIRM_LINK_LIFETIME)
+
+    assert result.outcome is ConfirmOutcome.EXPIRED
+    assert result.subscription is None
+    assert store.list_active() == []
+
+
+def test_the_confirm_link_works_just_before_it_expires(store: SubscriptionStore) -> None:
+    pending = store.request(SEM, EMAIL, NOW)
+
+    result = store.confirm(pending.token, NOW + CONFIRM_LINK_LIFETIME - timedelta(seconds=1))
+
+    assert result.outcome is ConfirmOutcome.CONFIRMED
+
+
+def test_the_confirm_link_works_only_once(store: SubscriptionStore) -> None:
+    pending = store.request(SEM, EMAIL, NOW)
+    store.confirm(pending.token, NOW)
+
+    result = store.confirm(pending.token, NOW)
+
+    assert result.outcome is ConfirmOutcome.USED
+    assert result.subscription is None
+
+
+def test_an_unknown_token_is_refused(store: SubscriptionStore) -> None:
+    result = store.confirm("no-such-token", NOW)
+
+    assert result.outcome is ConfirmOutcome.UNKNOWN
+    assert store.list_active() == []
+
+
+def test_each_request_gets_its_own_random_token(store: SubscriptionStore) -> None:
+    tokens = {store.request(SEM, EMAIL, NOW).token for _ in range(20)}
+
+    assert len(tokens) == 20
+    # Long enough that no one can guess one: secrets.token_urlsafe(32) gives 43 characters.
+    assert all(len(token) >= 43 for token in tokens)
+
+
+def test_confirming_the_same_instrument_twice_keeps_one_subscription(store: SubscriptionStore) -> None:
+    first = store.request(SEM, EMAIL, NOW)
+    second = store.request(SEM, "HANA.TESTOVA@example.org", NOW)
+
+    store.confirm(first.token, NOW)
+    store.confirm(second.token, NOW)
+
+    assert store.list_active() == [Subscription(SEM, EMAIL)]
+
+
+def test_one_guarantor_subscribes_to_each_instrument_on_its_own(store: SubscriptionStore) -> None:
+    sem = store.request(SEM, EMAIL, NOW)
+    store.request(LAB, EMAIL, NOW)
+
+    store.confirm(sem.token, NOW)
+
+    assert store.list_active() == [Subscription(SEM, EMAIL)]
+
+
+def test_the_database_keeps_only_a_hash_of_the_token(tmp_path: Path) -> None:
+    path = tmp_path / "standup.sqlite3"
+    pending = SubscriptionStore(path).request(SEM, EMAIL, NOW)
+
+    with closing(sqlite3.connect(path)) as db:
+        dump = "\n".join(db.iterdump())
+
+    assert pending.token not in dump
+
+
+def test_opens_a_database_made_before_confirm_links_existed(tmp_path: Path) -> None:
+    path = tmp_path / "standup.sqlite3"
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute(
+            "CREATE TABLE subscription (id INTEGER PRIMARY KEY, instrument_id TEXT NOT NULL, email TEXT NOT NULL,"
+            " status TEXT NOT NULL CHECK (status IN ('active')), created_at TEXT NOT NULL,"
+            " UNIQUE (instrument_id, email))"
+        )
+        db.execute(
+            "INSERT INTO subscription (instrument_id, email, status, created_at) VALUES (?, ?, 'active', ?)",
+            (LAB, EMAIL, NOW.isoformat()),
+        )
+
+    store = SubscriptionStore(path)
+    pending = store.request(SEM, EMAIL, NOW)
+    store.confirm(pending.token, NOW)
+
+    assert store.list_active() == [Subscription(LAB, EMAIL), Subscription(SEM, EMAIL)]
