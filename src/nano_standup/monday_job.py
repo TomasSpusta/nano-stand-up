@@ -49,11 +49,5 @@ def _user_facts(source: BookingSource, instrument_id: str, reservations: list[Re
     Cancelled reservations need none: no heads-up rule about users looks at them.
     A reservation without a user id gets none either; the brief then treats its user as having no certificate.
     """
-    user_ids = sorted({r.user_id for r in reservations if r.is_not_cancelled and r.user_id})
-    return {
-        user_id: UserFacts(
-            certificates=source.get_certificates(instrument_id, user_id),
-            reservation_starts=source.get_reservation_starts(instrument_id, user_id),
-        )
-        for user_id in user_ids
-    }
+    user_ids = sorted({r.user_id for r in reservations if not r.is_cancelled and r.user_id})
+    return {user_id: source.get_user_facts(instrument_id, user_id) for user_id in user_ids}

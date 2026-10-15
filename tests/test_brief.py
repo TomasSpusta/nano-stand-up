@@ -768,3 +768,12 @@ def test_the_rules_about_users_come_after_working_hours_and_before_cancelled() -
         "No valid certificate",
         "Cancelled",
     ]
+
+
+def test_a_guarantor_without_a_user_id_does_not_hide_a_user_without_one() -> None:
+    no_user_id = replace(INSTRUMENT, guarantor=replace(INSTRUMENT.guarantor, user_id=None))
+    reservations = [reservation("2026-10-20T09:00", "2026-10-20T10:00", user_name="Jana Smyslena", user_id="")]
+
+    brief = build_brief(no_user_id, WEEK, reservations, {}, BUILT_AT, HEADS_UP_SETTINGS)
+
+    assert _heads_up_text(brief) == "No valid certificate Tue 20. 10. 09:00 to 10:00, Jana Smyslena (missing)"

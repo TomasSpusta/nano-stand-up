@@ -12,7 +12,7 @@ from nano_standup.booking_api import (
     BookingDataError,
 )
 from nano_standup.booking_source import InstrumentNotFound
-from nano_standup.domain import Certificate, Guarantor, ReservationStatus, Week
+from nano_standup.domain import Certificate, Guarantor, ReservationStatus, UserFacts, Week
 
 from fake_booking_api import SEM_ID as SEM
 from fake_booking_api import (
@@ -291,7 +291,7 @@ def test_get_instrument_logs_a_guarantor_without_a_contact_and_gives_no_user_id(
 
     instrument = ApiBookingSource(api).get_instrument(SEM)
 
-    assert instrument.guarantor.user_id == ""
+    assert instrument.guarantor.user_id is None
     assert "TEST-SEM" in caplog.text
     assert "no contact" in caplog.text
 
@@ -365,6 +365,24 @@ def test_get_reservation_starts_reads_the_user_sessions_on_the_instrument_withou
     starts = ApiBookingSource(api).get_reservation_starts(SEM, JANA)
 
     assert sorted(starts) == [datetime(2025, 3, 11, 10, 30), datetime(2026, 10, 20, 9, 0), datetime(2026, 10, 21, 9, 0)]
+
+
+def test_get_reservation_starts_leaves_out_a_session_without_a_reservation(api: FakeBookingApi) -> None:
+    booked = session_json(_jana_json("booked", SEM, "2026-10-20T09:00:00"), SEM)
+    api.sessions = [booked, {**booked, "id": "session-not-booked", "ge_serviceappointmentid": None}]
+
+    assert ApiBookingSource(api).get_reservation_starts(SEM, JANA) == [datetime(2026, 10, 20, 9, 0)]
+
+
+def test_get_user_facts_gives_the_certificates_and_the_reservation_starts(api: FakeBookingApi) -> None:
+    api.contacts[JANA] = contact_json(JANA, "sysuser-jana")
+    api.certificates[("sysuser-jana", SEM)] = [certificate_json("2024-04-23T00:00:00", None)]
+    api.sessions = [session_json(_jana_json("booked", SEM, "2026-10-20T09:00:00"), SEM)]
+
+    assert ApiBookingSource(api).get_user_facts(SEM, JANA) == UserFacts(
+        certificates=[Certificate(valid_from=date(2024, 4, 23), valid_to=None)],
+        reservation_starts=[datetime(2026, 10, 20, 9, 0)],
+    )
 
 
 def test_get_reservation_starts_reads_every_page_of_50(api: FakeBookingApi) -> None:

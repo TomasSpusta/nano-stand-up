@@ -14,8 +14,8 @@ from nano_standup.domain import (
     ReservationStatus,
     UserFacts,
     WorkingHours,
-    day_month_year,
 )
+from nano_standup.formatting import day_month_year
 
 NEW_USER = "New user"
 NO_VALID_CERTIFICATE = "No valid certificate"
@@ -47,13 +47,15 @@ class HeadsUpRule:
     # A finding when the rule matches the reservation, or None.
     check: Callable[[Reservation], Finding | None]
 
-    def matches(self, reservation: Reservation) -> bool:
-        return self.check(reservation) is not None
-
 
 def _when(condition: Callable[[Reservation], bool]) -> Callable[[Reservation], Finding | None]:
     """A check that finds nothing more than that the reservation matches."""
     return lambda reservation: Finding() if condition(reservation) else None
+
+
+def _unless_cancelled(check: Callable[[Reservation], Finding | None]) -> Callable[[Reservation], Finding | None]:
+    """A check that never matches a cancelled reservation."""
+    return lambda reservation: None if reservation.is_cancelled else check(reservation)
 
 
 # The counts use this rule too, so the heads-up and the "waiting for your approval" count always agree.
@@ -63,9 +65,12 @@ WAITING_FOR_APPROVAL = HeadsUpRule(
 
 
 def heads_up_rules(
-    settings: HeadsUpSettings, guarantor_user_id: str, user_facts: Mapping[str, UserFacts]
+    settings: HeadsUpSettings, guarantor_user_id: str | None, user_facts: Mapping[str, UserFacts]
 ) -> list[HeadsUpRule]:
-    """`user_facts` by user id. A user without facts has no certificate and no reservations before."""
+    """`user_facts` by user id. A user without facts has no certificate and no reservations before.
+
+    A cancelled reservation matches only the Cancelled rule: it needs no safety check, and its user needs no check.
+    """
     working_hours = settings.working_hours
 
     def facts_of(reservation: Reservation) -> UserFacts:
@@ -77,18 +82,22 @@ def heads_up_rules(
         HeadsUpRule("No experiment plan", _when(lambda reservation: reservation.is_missing_experiment_plan)),
         HeadsUpRule(
             f"Outside working hours ({working_hours.start:%H:%M} to {working_hours.end:%H:%M}, Monday to Friday)",
-            # A cancelled reservation needs no safety check.
-            _when(lambda reservation: reservation.is_not_cancelled and not working_hours.covers(reservation)),
+            _unless_cancelled(_when(lambda reservation: not working_hours.covers(reservation))),
         ),
         HeadsUpRule(
-            NEW_USER, lambda reservation: _new_user(reservation, facts_of(reservation), settings.new_user_reservations)
+            NEW_USER,
+            _unless_cancelled(
+                lambda reservation: _new_user(reservation, facts_of(reservation), settings.new_user_reservations)
+            ),
         ),
         HeadsUpRule(
             NO_VALID_CERTIFICATE,
-            lambda reservation: _no_valid_certificate(reservation, facts_of(reservation), guarantor_user_id),
+            _unless_cancelled(
+                lambda reservation: _no_valid_certificate(reservation, facts_of(reservation), guarantor_user_id)
+            ),
         ),
         # The guarantor can re-plan a freed slot.
-        HeadsUpRule("Cancelled", _when(lambda reservation: reservation.status is ReservationStatus.CANCELLED)),
+        HeadsUpRule("Cancelled", _when(lambda reservation: reservation.is_cancelled)),
     ]
 
 
@@ -97,7 +106,7 @@ def _new_user(reservation: Reservation, facts: UserFacts, limit: int) -> Finding
 
     A user with no certificate is not a new user: the certificate rule points them out.
     """
-    if not reservation.is_not_cancelled or not facts.certificates:
+    if not facts.certificates:
         return None
     since = min(certificate.valid_from for certificate in facts.certificates)
     if reservation.start.date() < since:
@@ -109,10 +118,9 @@ def _new_user(reservation: Reservation, facts: UserFacts, limit: int) -> Finding
     return Finding(detail=f"no. {number}", row_mark=f"{NEW_USER}, no. {number}")
 
 
-def _no_valid_certificate(reservation: Reservation, facts: UserFacts, guarantor_user_id: str) -> Finding | None:
+def _no_valid_certificate(reservation: Reservation, facts: UserFacts, guarantor_user_id: str | None) -> Finding | None:
     """No certificate of the user covers the reservation start. The guarantor's own reservations are left out."""
-    is_guarantor = bool(guarantor_user_id) and reservation.user_id == guarantor_user_id
-    if not reservation.is_not_cancelled or is_guarantor:
+    if reservation.user_id == guarantor_user_id:
         return None
     if any(certificate.covers(reservation.start) for certificate in facts.certificates):
         return None

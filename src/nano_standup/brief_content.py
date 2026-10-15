@@ -12,10 +12,8 @@ from nano_standup.domain import (
     ReservationStatus,
     UserFacts,
     Week,
-    day_month,
-    day_month_year,
-    day_name,
 )
+from nano_standup.formatting import day_month, day_month_year, day_name
 from nano_standup.heads_ups import WAITING_FOR_APPROVAL, Finding, HeadsUpRule, HeadsUpSettings, heads_up_rules
 
 NO_EXPERIMENT_PLAN = "No experiment plan given"
@@ -146,7 +144,7 @@ class BriefContent:
 
 
 @dataclass(frozen=True)
-class _Checked:
+class _ReservationFindings:
     """A reservation with what each heads-up rule found about it."""
 
     reservation: Reservation
@@ -167,7 +165,7 @@ def brief_content(
         raise ValueError(f"built_at must carry a time zone, got {built_at.isoformat()}")
     reservations = sorted(reservations, key=lambda r: r.start)
     rules = heads_up_rules(settings, instrument.guarantor.user_id, user_facts)
-    checked = [_Checked(r, _findings(r, rules)) for r in reservations]
+    found = [_ReservationFindings(r, _findings(r, rules)) for r in reservations]
     built_local = built_at.astimezone(PRAGUE)
     return BriefContent(
         subject=f"Brief: {instrument.alias} - week {_week_span(week)}",
@@ -175,8 +173,8 @@ def brief_content(
         instrument_name=instrument.name,
         week_line=f"{instrument.alias} - Monday {day_month(week.monday)} to Sunday {day_month_year(week.sunday)}",
         counts=_counts(week, reservations) if reservations else [],
-        heads_ups=_heads_ups(week, rules, checked),
-        days=_days(week, checked) if reservations else [],
+        heads_ups=_heads_ups(week, rules, found),
+        days=_days(week, found) if reservations else [],
         built=f"Built on {_full_date(built_local.date())} at {built_local:%H:%M}.",
     )
 
@@ -186,9 +184,9 @@ def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
 
     Hours count only inside the week, for a reservation that runs in from the previous week or past Sunday.
     """
-    not_cancelled = [r for r in reservations if r.is_not_cancelled]
+    not_cancelled = [r for r in reservations if not r.is_cancelled]
     cancelled = len(reservations) - len(not_cancelled)
-    waiting = sum(1 for r in reservations if WAITING_FOR_APPROVAL.matches(r))
+    waiting = sum(1 for r in reservations if WAITING_FOR_APPROVAL.check(r) is not None)
     hours = sum(week.time_inside(r).total_seconds() for r in not_cancelled) / 3600
     # Reservations with no user id still count each user name once.
     users = len({r.user_id or r.user_name for r in not_cancelled})
@@ -214,12 +212,12 @@ def _findings(reservation: Reservation, rules: list[HeadsUpRule]) -> dict[HeadsU
     return findings
 
 
-def _heads_ups(week: Week, rules: list[HeadsUpRule], checked: list[_Checked]) -> list[HeadsUp]:
+def _heads_ups(week: Week, rules: list[HeadsUpRule], found: list[_ReservationFindings]) -> list[HeadsUp]:
     """The rules that match, in a fixed order, each with its reservations in the order given."""
     heads_ups = [
         HeadsUp(
             rule.title,
-            [_heads_up_item(c.reservation, c.findings[rule], week) for c in checked if rule in c.findings],
+            [_heads_up_item(c.reservation, c.findings[rule], week) for c in found if rule in c.findings],
         )
         for rule in rules
     ]
@@ -238,19 +236,19 @@ def _shown_on(reservation: Reservation, week: Week) -> date:
     return max(reservation.start.date(), week.monday)
 
 
-def _days(week: Week, checked: list[_Checked]) -> list[Day]:
+def _days(week: Week, found: list[_ReservationFindings]) -> list[Day]:
     """Every weekday, empty or not. Weekend days only when they have reservations."""
     days = []
     for day in week.days():
-        rows = [_row(c, day) for c in checked if _shown_on(c.reservation, week) == day]
+        rows = [_row(c, day) for c in found if _shown_on(c.reservation, week) == day]
         if rows or day.weekday() not in WEEKEND:
             days.append(Day(day, rows))
     return days
 
 
-def _row(checked: _Checked, day: date) -> Row:
+def _row(found: _ReservationFindings, day: date) -> Row:
     """`day` is the day the row shows on."""
-    reservation = checked.reservation
+    reservation = found.reservation
     note = reservation.note.strip()
     return Row(
         status=reservation.status,
@@ -261,7 +259,7 @@ def _row(checked: _Checked, day: date) -> Row:
         experiment_plan=reservation.experiment_plan.strip(),
         note=note if _adds_to(note, reservation.experiment_plan) else "",
         private_note=reservation.private_note.strip(),
-        user_marks=[finding.row_mark for finding in checked.findings.values() if finding.row_mark],
+        user_marks=[finding.row_mark for finding in found.findings.values() if finding.row_mark],
     )
 
 

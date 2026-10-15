@@ -16,7 +16,8 @@ from nano_standup.domain import (
 from nano_standup.heads_ups import HeadsUpSettings
 
 # The user id follows the scheme of `reservation()`, so `reservation(..., user_name="Hana Testova")` is hers.
-GUARANTOR = Guarantor(name="Hana Testova", email="hana.testova@example.org", user_id="user-Hana Testova")
+GUARANTOR_USER_ID = "user-Hana Testova"
+GUARANTOR = Guarantor(name="Hana Testova", email="hana.testova@example.org", user_id=GUARANTOR_USER_ID)
 INSTRUMENT = Instrument(id="instr-1", name="Test Electron Microscope", alias="TEST-SEM", guarantor=GUARANTOR)
 WORKING_HOURS = WorkingHours(time(7, 0), time(19, 0))
 HEADS_UP_SETTINGS = HeadsUpSettings(working_hours=WORKING_HOURS, new_user_reservations=3)

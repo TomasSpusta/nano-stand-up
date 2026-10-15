@@ -128,7 +128,7 @@ def _heads_up_html(heads_up: HeadsUp) -> str:
 
 def _heads_up_item_html(item: HeadsUpItem) -> str:
     # A narrow screen may break the line between the day, the time span, and the user, never inside "Tue 20. 10.".
-    detail = f" ({_unbroken(html.escape(item.detail))})" if item.detail else ""
+    detail = f" ({_unbroken(_html_text(item.detail))})" if item.detail else ""
     return f"<li>{_unbroken(item.day)} {item.span.text(_unbroken)}, {_html_text(item.user_name)}{detail}</li>"
 
 

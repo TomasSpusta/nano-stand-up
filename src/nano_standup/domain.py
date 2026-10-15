@@ -6,31 +6,16 @@ from datetime import date, datetime, time, timedelta
 from enum import Enum
 from zoneinfo import ZoneInfo
 
+from nano_standup.formatting import day_name
+
 # The booking system and the guarantors work in Prague time.
 PRAGUE = ZoneInfo("Europe/Prague")
 
 # Gives the current time with a time zone. Passed in from outside, so tests can fix the time.
 Clock = Callable[[], datetime]
 
-# Day names written out, because `%A` and `%a` follow the server's time language.
-DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 # Saturday and Sunday, as date.weekday() gives them.
 WEEKEND = {5, 6}
-
-
-def day_name(day: date) -> str:
-    """English day name, such as "Tuesday", on any server time language."""
-    return DAY_NAMES[day.weekday()]
-
-
-def day_month(day: date) -> str:
-    """A day as "20. 10."."""
-    return f"{day.day}. {day.month}."
-
-
-def day_month_year(day: date) -> str:
-    """A day with its year, such as "20. 10. 2026"."""
-    return f"{day_month(day)} {day.year}"
 
 
 def normalize_email(email: str) -> str:
@@ -42,8 +27,8 @@ def normalize_email(email: str) -> str:
 class Guarantor:
     name: str
     email: str
-    # The guarantor as a user of instruments, as in Reservation.user_id. Empty when the booking system has none.
-    user_id: str
+    # The guarantor as a user of instruments, as in Reservation.user_id. None when the booking system has none.
+    user_id: str | None
 
 
 @dataclass(frozen=True)
@@ -89,14 +74,14 @@ class Reservation:
         return self.end - self.start
 
     @property
-    def is_not_cancelled(self) -> bool:
-        """Reserved or requested. A requested reservation may not happen, but it still counts."""
-        return self.status is not ReservationStatus.CANCELLED
+    def is_cancelled(self) -> bool:
+        """A requested reservation is not cancelled: it may not happen, but it still counts."""
+        return self.status is ReservationStatus.CANCELLED
 
     @property
     def is_missing_experiment_plan(self) -> bool:
         """Not cancelled and with no experiment plan. A cancelled reservation needs no experiment plan."""
-        return self.is_not_cancelled and not self.experiment_plan.strip()
+        return not self.is_cancelled and not self.experiment_plan.strip()
 
 
 @dataclass(frozen=True)

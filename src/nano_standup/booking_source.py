@@ -3,10 +3,9 @@
 The real version is `booking_api.ApiBookingSource`. The fake version here serves hand-made data for tests.
 """
 
-from datetime import datetime
 from typing import Protocol
 
-from nano_standup.domain import Certificate, Instrument, Reservation, Week
+from nano_standup.domain import Certificate, Instrument, Reservation, UserFacts, Week
 
 
 class InstrumentNotFound(LookupError):
@@ -22,12 +21,11 @@ class BookingSource(Protocol):
         """The reservations on the instrument that are inside the week, even only in part."""
         ...
 
-    def get_certificates(self, instrument_id: str, user_id: str) -> list[Certificate]:
-        """The user's certificates for the instrument, valid or not. `user_id` is a Reservation.user_id."""
-        ...
+    def get_user_facts(self, instrument_id: str, user_id: str) -> UserFacts:
+        """The user's certificates for the instrument, valid or not, and when their reservations on it start.
 
-    def get_reservation_starts(self, instrument_id: str, user_id: str) -> list[datetime]:
-        """When the user's reservations on the instrument start, from any time, without cancelled ones."""
+        `user_id` is a Reservation.user_id.
+        """
         ...
 
 
@@ -55,10 +53,12 @@ class FakeBookingSource:
     def get_reservations(self, instrument_id: str, week: Week) -> list[Reservation]:
         return [r for r in self._reservations.get(instrument_id, []) if week.overlaps(r)]
 
-    def get_certificates(self, instrument_id: str, user_id: str) -> list[Certificate]:
-        return list(self._certificates.get(instrument_id, {}).get(user_id, []))
-
-    def get_reservation_starts(self, instrument_id: str, user_id: str) -> list[datetime]:
-        return [
-            r.start for r in self._reservations.get(instrument_id, []) if r.user_id == user_id and r.is_not_cancelled
-        ]
+    def get_user_facts(self, instrument_id: str, user_id: str) -> UserFacts:
+        return UserFacts(
+            certificates=list(self._certificates.get(instrument_id, {}).get(user_id, [])),
+            reservation_starts=[
+                r.start
+                for r in self._reservations.get(instrument_id, [])
+                if r.user_id == user_id and not r.is_cancelled
+            ],
+        )

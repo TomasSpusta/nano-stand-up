@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from nano_standup.booking_source import InstrumentNotFound
-from nano_standup.domain import Certificate, Guarantor, Instrument, Reservation, ReservationStatus, Week
+from nano_standup.domain import Certificate, Guarantor, Instrument, Reservation, ReservationStatus, UserFacts, Week
 
 log = logging.getLogger(__name__)
 
@@ -114,8 +114,8 @@ class ApiBookingSource:
         if not email:
             raise BookingDataError(f"Instrument {alias} ({instrument_id}) has no guarantor email in the booking system")
         # The guarantor's contact is their user id on reservations.
-        user_id = (guarantor_json.get("ge_contactid") or {}).get("id") or ""
-        if not user_id:
+        user_id = (guarantor_json.get("ge_contactid") or {}).get("id") or None
+        if user_id is None:
             log.warning(
                 "The guarantor of instrument %s (%s) has no contact in the booking system; "
                 "their own reservations get the certificate heads-up",
@@ -155,7 +155,14 @@ class ApiBookingSource:
         experiment_plans = self._experiment_plans(windows)
         return [replace(r, experiment_plan=experiment_plans.get(r.id, "")) for r in reservations]
 
+    def get_user_facts(self, instrument_id: str, user_id: str) -> UserFacts:
+        return UserFacts(
+            certificates=self.get_certificates(instrument_id, user_id),
+            reservation_starts=self.get_reservation_starts(instrument_id, user_id),
+        )
+
     def get_certificates(self, instrument_id: str, user_id: str) -> list[Certificate]:
+        """The user's certificates for the instrument, valid or not, through the system user of their contact."""
         contact = self._api.get(f"/api/contact/{urllib.parse.quote(user_id)}", {})
         system_user_id = (contact.get("ge_systemuserid") or {}).get("id")
         if not system_user_id:
@@ -177,6 +184,7 @@ class ApiBookingSource:
         return certificates
 
     def get_reservation_starts(self, instrument_id: str, user_id: str) -> list[datetime]:
+        """When the user's reservations on the instrument start, from any time, without cancelled ones."""
         filters = [f"ge_equipmentid:eq:{instrument_id}", f"ge_realised_for_contactid:eq:{user_id}"]
         # By reservation id: a reservation with several sessions counts once.
         starts: dict[str, datetime] = {}

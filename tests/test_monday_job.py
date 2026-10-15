@@ -9,7 +9,16 @@ from nano_standup.mail import InMemoryMailSender, Message
 from nano_standup.monday_job import run_monday_job
 from nano_standup.subscriptions import SubscriptionStore
 
-from helpers import GUARANTOR, HEADS_UP_SETTINGS, INSTRUMENT, OLD_CERTIFICATE, heads_up_text, reservation, visible_text
+from helpers import (
+    GUARANTOR,
+    GUARANTOR_USER_ID,
+    HEADS_UP_SETTINGS,
+    INSTRUMENT,
+    OLD_CERTIFICATE,
+    heads_up_text,
+    reservation,
+    visible_text,
+)
 
 # Monday 19 October 2026, 08:00 in Prague.
 MONDAY_8AM = datetime(2026, 10, 19, 6, 0, tzinfo=UTC)
@@ -244,10 +253,18 @@ def test_a_certificate_valid_on_the_reservation_day_is_enough(tmp_path: Path) ->
     assert "HEADS-UP" not in message.text
 
 
-def test_the_guarantor_own_reservations_never_lack_a_certificate(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "certificates",
+    [[], [Certificate(valid_from=date(2020, 1, 1), valid_to=date(2026, 5, 31))]],
+    ids=["missing", "expired"],
+)
+def test_the_guarantor_own_reservations_never_lack_a_certificate(
+    tmp_path: Path, certificates: list[Certificate]
+) -> None:
     reservations = [reservation("2026-10-20T09:00", "2026-10-20T10:00", user_name=GUARANTOR.name)]
+    reservations += _earlier_reservations(GUARANTOR.name)
 
-    message = _brief_for(tmp_path, reservations, {})
+    message = _brief_for(tmp_path, reservations, {GUARANTOR_USER_ID: certificates})
 
     assert "HEADS-UP" not in message.text
     assert "No valid certificate" not in visible_text(message.html)
