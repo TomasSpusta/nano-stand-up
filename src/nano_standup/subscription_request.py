@@ -15,7 +15,6 @@ from nano_standup.domain import (
     Instrument,
     InstrumentName,
     NotTheGuarantor,
-    normalize_email,
     require_guarantor,
 )
 from nano_standup.formatting import day_month_year, day_name
@@ -71,7 +70,7 @@ class SubscriptionRequests:
             log.info("Subscription request for instrument %s, which is not in the subscribable list", instrument_id)
             return
         instrument = self._source.get_instrument(instrument_id)
-        if normalize_email(email) != normalize_email(instrument.guarantor.email):
+        if not instrument.has_guarantor_email(email):
             # The typed email is not logged: it may belong to anyone.
             log.info("Subscription request for %s with an email that is not its guarantor email", instrument.label)
             return
