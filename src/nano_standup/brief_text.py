@@ -9,7 +9,6 @@ from nano_standup.brief_content import (
     HeadsUp,
     HeadsUpItem,
     Row,
-    time_span,
 )
 
 
@@ -29,7 +28,7 @@ def brief_text(content: BriefContent) -> str:
 
 
 def _heads_ups_text(heads_ups: list[HeadsUp]) -> list[str]:
-    """The Heads-up box, or nothing when no rule matches."""
+    """The Heads-up section, or nothing when no rule matches."""
     if not heads_ups:
         return []
     lines = ["HEADS-UP"]
@@ -40,13 +39,13 @@ def _heads_ups_text(heads_ups: list[HeadsUp]) -> list[str]:
 
 
 def _heads_up_item_text(item: HeadsUpItem) -> str:
-    return f"{item.day} {time_span(item.start, item.end, item.runs_in)}, {item.user_name}"
+    return f"{item.day} {item.span.text()}, {item.user_name}"
 
 
 def _row_text(row: Row) -> list[str]:
     mark = f"[{row.mark}] " if row.mark else ""
     lines = [
-        f"  {mark}{time_span(row.start, row.end, row.runs_in)} ({row.length})",
+        f"  {mark}{row.span.text()} ({row.length})",
         f"    {', '.join(part for part in (row.user_name, row.project_code) if part)}",
         *_indented(row.experiment_plan or NO_EXPERIMENT_PLAN),
     ]

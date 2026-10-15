@@ -128,7 +128,7 @@ def test_a_cancelled_reservation_is_crossed_out_marked_and_counted_apart() -> No
     assert "0 without an experiment plan" in text
     assert "1 cancelled" in text
     assert "13:00 to 15:00 2 h Cancelled Jana Smyslena" in text
-    # The last match is the row: the Heads-up box above it names the same time and user.
+    # The last match is the row: the Heads-up section above it names the same time and user.
     row = html[html.rindex("13:00 to 15:00") - 300 : html.rindex("Jana Smyslena")]
     assert "line-through" in row
 
@@ -144,7 +144,7 @@ def test_a_requested_reservation_is_marked_highlighted_and_still_counted() -> No
     assert "09:00 to 12:00 3 h Requested: needs your approval Jana Smyslena" in text
     assert "1 reservation " in text
     assert "0 cancelled" in text
-    # The last match is the row: the Heads-up box above it names the same time and user.
+    # The last match is the row: the Heads-up section above it names the same time and user.
     row = html[html.rindex("09:00 to 12:00") - 300 : html.rindex("Jana Smyslena")]
     assert "background:#fffbeb" in row
 
@@ -431,12 +431,12 @@ def test_a_reservation_that_started_in_an_earlier_year_shows_the_year() -> None:
 
 
 def _heads_up_text(brief: Brief) -> str:
-    """The Heads-up box of the plain-text version, on one line. Checks that the HTML version shows the same."""
+    """The Heads-up section of the plain-text version, on one line. Checks that the HTML version shows the same."""
     lines = brief.text.splitlines()
     start = lines.index("HEADS-UP")
-    box = " ".join(" ".join(lines[start + 1 : lines.index("", start)]).split())
-    assert f"Heads-up {box}" in visible_text(brief.html)
-    return box
+    section = " ".join(" ".join(lines[start + 1 : lines.index("", start)]).split())
+    assert f"Heads-up {section}" in visible_text(brief.html)
+    return section
 
 
 def test_a_reservation_without_an_experiment_plan_is_a_heads_up() -> None:
@@ -451,7 +451,7 @@ def test_a_reservation_without_an_experiment_plan_is_a_heads_up() -> None:
     assert "Petr Vymysleny" not in heads_up
 
 
-def test_the_heads_up_box_is_left_out_when_no_rule_matches() -> None:
+def test_the_heads_up_section_is_left_out_when_no_rule_matches() -> None:
     reservations = [reservation("2026-10-19T07:00", "2026-10-19T19:00")]
 
     brief = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT, WORKING_HOURS)
@@ -471,6 +471,8 @@ def test_the_heads_up_box_is_left_out_when_no_rule_matches() -> None:
         ("2026-10-20T22:00", "2026-10-21T02:00", "Tue 20. 10. 22:00 to Wed 02:00, Jana Smyslena"),
         ("2026-10-20T17:00", "2026-10-21T00:00", "Tue 20. 10. 17:00 to Wed 00:00, Jana Smyslena"),
         ("2026-10-23T18:00", "2026-10-24T01:00", "Fri 23. 10. 18:00 to Sat 01:00, Jana Smyslena"),
+        # Early start and overnight.
+        ("2026-10-19T06:00", "2026-10-20T02:00", "Mon 19. 10. 06:00 to Tue 02:00, Jana Smyslena"),
         # Weekend.
         ("2026-10-24T10:00", "2026-10-24T12:00", "Sat 24. 10. 10:00 to 12:00, Jana Smyslena"),
         ("2026-10-25T10:00", "2026-10-25T12:00", "Sun 25. 10. 10:00 to 12:00, Jana Smyslena"),

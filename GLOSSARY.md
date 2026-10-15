@@ -34,9 +34,14 @@ The part of a brief that shows each reservation as booked, with no AI rewording.
 _Avoid_: Schedule, agenda
 
 **Heads-up**:
-A short line at the top of a brief that points out something in the week the guarantor may want to act on.
+One rule's finding about the week that the guarantor may want to act on: the rule's title and the reservations it matched, each by day, time, and user.
 Each heads-up comes from a fixed rule, not from an LLM.
 _Avoid_: Alert, warning, AI summary, insight
+
+**Heads-up section**:
+The part at the top of a brief that holds the week's heads-ups.
+The brief leaves it out when no rule matches.
+_Avoid_: Heads-up box
 
 **Reservation**:
 A booked time slot on an instrument for a user and a project.

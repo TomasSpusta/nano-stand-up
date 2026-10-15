@@ -1,6 +1,6 @@
 """Heads-up rules: fixed rules that pick the reservations of the week a guarantor may want to act on.
 
-Each rule gives its matching reservations, or none. The brief shows only the rules with a match.
+The brief shows each rule that matches a reservation of the week, in the order given here.
 """
 
 from collections.abc import Callable
@@ -15,19 +15,11 @@ class HeadsUpRule:
     matches: Callable[[Reservation], bool]
 
 
-@dataclass(frozen=True)
-class HeadsUpMatch:
-    """A rule that matched, with its reservations. The brief turns it into a heads-up it can show."""
-
-    title: str
-    reservations: list[Reservation]
-
-
-def _rules(working_hours: WorkingHours) -> list[HeadsUpRule]:
+def heads_up_rules(working_hours: WorkingHours) -> list[HeadsUpRule]:
     # First the reservations the guarantor has to approve, as in the counts.
     return [
         HeadsUpRule("Waiting for your approval", lambda reservation: reservation.status is ReservationStatus.REQUESTED),
-        HeadsUpRule("No experiment plan", lambda reservation: reservation.lacks_experiment_plan),
+        HeadsUpRule("No experiment plan", lambda reservation: reservation.will_happen_without_experiment_plan),
         HeadsUpRule(
             f"Outside working hours ({working_hours.start:%H:%M} to {working_hours.end:%H:%M}, Monday to Friday)",
             # A cancelled reservation needs no safety check.
@@ -37,10 +29,3 @@ def _rules(working_hours: WorkingHours) -> list[HeadsUpRule]:
         HeadsUpRule("Cancelled", lambda reservation: not reservation.will_happen),
     ]
 
-
-def heads_up_matches(reservations: list[Reservation], working_hours: WorkingHours) -> list[HeadsUpMatch]:
-    """The rules that match, in a fixed order, each with its reservations in the order given."""
-    matches = [
-        HeadsUpMatch(rule.title, [r for r in reservations if rule.matches(r)]) for rule in _rules(working_hours)
-    ]
-    return [match for match in matches if match.reservations]

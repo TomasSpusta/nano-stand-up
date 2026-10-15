@@ -19,7 +19,6 @@ from nano_standup.brief_content import (
     HeadsUpItem,
     LabelledNote,
     Row,
-    time_span,
 )
 from nano_standup.domain import ReservationStatus
 
@@ -96,7 +95,7 @@ def _count_html(count: Count) -> str:
 
 
 def _heads_ups_html(heads_ups: list[HeadsUp]) -> str:
-    """The Heads-up box, or nothing when no rule matches."""
+    """The Heads-up section, or nothing when no rule matches."""
     if not heads_ups:
         return ""
     sections = "".join(
@@ -112,8 +111,7 @@ def _heads_ups_html(heads_ups: list[HeadsUp]) -> str:
 
 def _heads_up_item_html(item: HeadsUpItem) -> str:
     # A narrow screen may break the line between the day, the time span, and the user, never inside "Tue 20. 10.".
-    span = time_span(_unbroken(item.start), _unbroken(item.end), item.runs_in)
-    return f"<li>{_unbroken(item.day)} {span}, {_html_text(item.user_name)}</li>"
+    return f"<li>{_unbroken(item.day)} {item.span.text(_unbroken)}, {_html_text(item.user_name)}</li>"
 
 
 def _day_html(day: Day) -> str:
@@ -140,7 +138,7 @@ def _row_html(row: Row) -> str:
         else ("", "")
     )
     # A narrow column may break the time span only around "from" and "to", never inside "Wed 13:00".
-    span = time_span(_unbroken(row.start), _unbroken(row.end), row.runs_in)
+    span = row.span.text(_unbroken)
     mark = (
         f'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:{style.mark_color};">{row.mark}</div>'
         if row.mark

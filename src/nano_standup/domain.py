@@ -82,7 +82,7 @@ class Reservation:
         return self.status is not ReservationStatus.CANCELLED
 
     @property
-    def lacks_experiment_plan(self) -> bool:
+    def will_happen_without_experiment_plan(self) -> bool:
         """A cancelled reservation needs no experiment plan."""
         return self.will_happen and not self.experiment_plan.strip()
 

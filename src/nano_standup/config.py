@@ -24,7 +24,7 @@ class Settings:
     smtp: SmtpSettings
     mail_from: str
     database_path: Path
-    # The Heads-up box points out reservations outside these hours.
+    # The Heads-up section points out reservations outside these hours.
     working_hours: WorkingHours
 
 
