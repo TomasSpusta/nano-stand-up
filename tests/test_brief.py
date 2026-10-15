@@ -13,6 +13,7 @@ from nano_standup.heads_ups import HeadsUpSettings
 from helpers import (
     HEADS_UP_SETTINGS,
     INSTRUMENT,
+    UNSUBSCRIBE_LINK,
     experienced_users,
     heads_up_text,
     reservation,
@@ -29,10 +30,11 @@ def _build(
     week: Week = WEEK,
     built_at: datetime = BUILT_AT,
     settings: HeadsUpSettings = HEADS_UP_SETTINGS,
+    unsubscribe_link: str = UNSUBSCRIBE_LINK,
 ) -> Brief:
     """The brief for the test instrument. Without `user_facts`, every user is certified and not a new user."""
     facts = experienced_users(reservations) if user_facts is None else user_facts
-    return build_brief(INSTRUMENT, week, reservations, facts, built_at, settings)
+    return build_brief(INSTRUMENT, week, reservations, facts, built_at, settings, unsubscribe_link)
 
 
 def test_subject_and_heading_name_the_instrument_and_the_week() -> None:
@@ -104,6 +106,22 @@ def test_footer_shows_the_build_time() -> None:
 
     assert "Built on Monday 19. 10. 2026 at 09:47." in text
     assert "Check the booking system for later changes." in text
+
+
+def test_the_footer_has_the_unsubscribe_link_in_both_versions() -> None:
+    brief = _build([])
+
+    assert f'<a href="{UNSUBSCRIBE_LINK}"' in brief.html
+    assert "Unsubscribe from this brief" in visible_text(brief.html)
+    assert f"Unsubscribe from this brief: {UNSUBSCRIBE_LINK}" in brief.text
+
+
+def test_the_unsubscribe_link_is_escaped() -> None:
+    link = 'https://standup.example.org/unsubscribe?token=a"b&c'
+
+    html = _build([], unsubscribe_link=link).html
+
+    assert '<a href="https://standup.example.org/unsubscribe?token=a&quot;b&amp;c"' in html
 
 
 def test_user_text_is_escaped() -> None:
@@ -374,6 +392,8 @@ FRIDAY 23. 10.
 
 Built on Monday 19. 10. 2026 at 08:00.
 Check the booking system for later changes.
+
+Unsubscribe from this brief: https://standup.example.org/unsubscribe?token=test-token
 """
     assert text == expected
 
@@ -587,7 +607,7 @@ def test_the_heads_ups_come_in_a_fixed_order_waiting_for_approval_first_and_canc
     ]
 
     content = brief_content(
-        INSTRUMENT, WEEK, reservations, experienced_users(reservations), BUILT_AT, HEADS_UP_SETTINGS
+        INSTRUMENT, WEEK, reservations, experienced_users(reservations), BUILT_AT, HEADS_UP_SETTINGS, UNSUBSCRIBE_LINK
     )
 
     assert [heads_up.title for heads_up in content.heads_ups] == [
@@ -760,7 +780,7 @@ def test_the_rules_about_users_come_after_working_hours_and_before_cancelled() -
     ended = Certificate(valid_from=date(2026, 10, 1), valid_to=date(2026, 10, 18))
     facts = {**experienced_users(reservations), reservations[0].user_id: _facts([ended])}
 
-    content = brief_content(INSTRUMENT, WEEK, reservations, facts, BUILT_AT, HEADS_UP_SETTINGS)
+    content = brief_content(INSTRUMENT, WEEK, reservations, facts, BUILT_AT, HEADS_UP_SETTINGS, UNSUBSCRIBE_LINK)
 
     assert [heads_up.title for heads_up in content.heads_ups] == [
         "Outside working hours (07:00 to 19:00, Monday to Friday)",
@@ -774,6 +794,6 @@ def test_a_guarantor_without_a_user_id_does_not_hide_a_user_without_one() -> Non
     no_user_id = replace(INSTRUMENT, guarantor=replace(INSTRUMENT.guarantor, user_id=None))
     reservations = [reservation("2026-10-20T09:00", "2026-10-20T10:00", user_name="Jana Smyslena", user_id="")]
 
-    brief = build_brief(no_user_id, WEEK, reservations, {}, BUILT_AT, HEADS_UP_SETTINGS)
+    brief = build_brief(no_user_id, WEEK, reservations, {}, BUILT_AT, HEADS_UP_SETTINGS, UNSUBSCRIBE_LINK)
 
     assert _heads_up_text(brief) == "No valid certificate Tue 20. 10. 09:00 to 10:00, Jana Smyslena (missing)"

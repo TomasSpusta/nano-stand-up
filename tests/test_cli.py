@@ -12,16 +12,18 @@ from nano_standup.run_lock import run_lock
 from nano_standup.subscriptions import Subscription, SubscriptionStore
 
 from fake_booking_api import sem_json
+from helpers import FakeSmtpServer
 from local_booking_server import API_KEY, local_booking_server
 
 SEM = sem_json()
 
 
-def write_config(tmp_path: Path, booking_url: str) -> Path:
+def write_config(tmp_path: Path, booking_url: str, public_base_url: str | None = "https://standup.example.org") -> Path:
     path = tmp_path / ".env"
     path.write_text(
         f"BOOKING_API_BASE_URL={booking_url}\nBOOKING_API_KEY={API_KEY}\n"
-        "SMTP_HOST=127.0.0.1\nSMTP_PORT=1\nMAIL_FROM=standup@example.org\nSERVICE_ADMIN_EMAIL=service-admin@example.org\nDATABASE_PATH=data/standup.sqlite3\n"
+        "SMTP_HOST=127.0.0.1\nSMTP_PORT=1\nMAIL_FROM=standup@example.org\nSERVICE_ADMIN_EMAIL=service-admin@example.org\n"
+        "DATABASE_PATH=data/standup.sqlite3\n" + (f"PUBLIC_BASE_URL={public_base_url}\n" if public_base_url else "")
     )
     return path
 
@@ -103,6 +105,31 @@ def test_an_unexpected_failure_exits_with_code_1(tmp_path: Path) -> None:
     assert main(["--config", str(config), "run-monday-job"]) == 1
 
 
+def test_the_monday_job_sends_briefs_with_unsubscribe_links_at_the_public_base_url(
+    tmp_path: Path, smtp: FakeSmtpServer
+) -> None:
+    with local_booking_server({"equip-sem": SEM}) as server:
+        config = write_config(tmp_path, server.url)
+        main(["--config", str(config), "add-subscription", "equip-sem", "hana.testova@example.org"])
+        code = main(
+            ["--config", str(config), "run-monday-job"],
+            clock=lambda: datetime(2026, 10, 19, 6, 0, tzinfo=UTC),  # Monday 08:00 in Prague.
+            sleep=lambda _: pytest.fail("nothing to try again"),
+        )
+
+    assert code == 0
+    [email] = smtp.sent
+    plain = email.get_body(("plain",))
+    assert plain is not None
+    assert "Unsubscribe from this brief: https://standup.example.org/unsubscribe?token=" in plain.get_content()
+
+
+def test_the_monday_job_without_a_public_base_url_exits_with_code_2(tmp_path: Path) -> None:
+    config = write_config(tmp_path, "http://127.0.0.1:1", public_base_url=None)
+
+    assert main(["--config", str(config), "run-monday-job"]) == 2
+
+
 def test_serve_runs_the_web_app_with_the_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     started: dict[str, Any] = {}  # Any: the arguments uvicorn.run got.
 
@@ -113,7 +140,7 @@ def test_serve_runs_the_web_app_with_the_settings(tmp_path: Path, monkeypatch: p
     with local_booking_server({"equip-sem": SEM}) as server:
         config = write_config(tmp_path, server.url)
         with config.open("a") as file:
-            file.write("PUBLIC_BASE_URL=https://standup.example.org\nWEB_PORT=8081\n")
+            file.write("WEB_PORT=8081\n")
         code = main(["--config", str(config), "serve"])
         page = TestClient(started["app"]).get("/")
 
@@ -126,7 +153,7 @@ def test_serve_runs_the_web_app_with_the_settings(tmp_path: Path, monkeypatch: p
 
 def test_serve_without_a_public_base_url_exits_with_code_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: pytest.fail("the web app must not start"))
-    config = write_config(tmp_path, "http://127.0.0.1:1")
+    config = write_config(tmp_path, "http://127.0.0.1:1", public_base_url=None)
 
     assert main(["--config", str(config), "serve"]) == 2
 

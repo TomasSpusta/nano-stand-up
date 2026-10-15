@@ -1,7 +1,10 @@
 import locale
+import smtplib
 from collections.abc import Iterator
 
 import pytest
+
+from helpers import FakeSmtpServer
 
 # Runs a pytest run inside a test, to check what a failure prints.
 pytest_plugins = ["pytester"]
@@ -26,3 +29,11 @@ def czech_time_language() -> Iterator[None]:
         yield
     finally:
         locale.setlocale(locale.LC_TIME, before)
+
+
+@pytest.fixture
+def smtp(monkeypatch: pytest.MonkeyPatch) -> FakeSmtpServer:
+    """A fake mail server that every smtplib.SMTP connection in the test goes to."""
+    server = FakeSmtpServer()
+    monkeypatch.setattr(smtplib, "SMTP", server.connect)
+    return server

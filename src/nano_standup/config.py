@@ -35,8 +35,8 @@ class Settings:
     database_path: Path
     # The limits of the heads-up rules, such as the working hours.
     heads_up: HeadsUpSettings
-    # The address guarantors open the web app at, without a trailing slash. Confirm links start with it.
-    # Only the web app needs it, so it may be missing for the other commands.
+    # The address guarantors open the web app at, without a trailing slash. Confirm links and the unsubscribe links
+    # in the briefs start with it. Only the web app and the Monday job need it, so it may be missing for the others.
     public_base_url: str | None
     # Where the web app listens.
     web_host: str

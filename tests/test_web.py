@@ -13,7 +13,7 @@ from nano_standup.domain import Guarantor, Instrument, InstrumentName, Reservati
 from nano_standup.mail import InMemoryMailSender, MailSender, Message
 from nano_standup.subscription_request import CONFIRM_MAIL_GAP, SubscriptionRequests
 from nano_standup.subscriptions import CONFIRM_LINK_LIFETIME, Subscription, SubscriptionStore
-from nano_standup.web import create_app
+from nano_standup.web import create_app, unsubscribe_link_for
 
 from helpers import GUARANTOR, INSTRUMENT, visible_text
 
@@ -69,11 +69,20 @@ class Site:
         assert match.group() in self.mail.sent[-1].html
         return match.group().removeprefix(BASE_URL)
 
-    def press_confirm(self, link: str) -> Response:
-        """What a person does: open the link, then press the button on the page."""
-        token = link.partition("token=")[2]
-        assert f'value="{token}"' in self.client.get(link).text
-        response: Response = self.client.post("/confirm", data={"token": token})
+    def unsubscribe_link(self, subscription: Subscription) -> str:
+        """The unsubscribe link a brief of the subscription has, without the base URL."""
+        token = self.store.unsubscribe_token(subscription, self.clock())
+        assert token is not None, "an active subscription gets a token"
+        return unsubscribe_link_for(BASE_URL, token).removeprefix(BASE_URL)
+
+    def press_button(self, link: str) -> Response:
+        """What a person does: open a confirm or unsubscribe link, then press the button on the page."""
+        path, _, query = link.partition("?")
+        token = query.partition("token=")[2]
+        page = self.client.get(link).text
+        assert f'value="{token}"' in page
+        assert f'action="{path.removeprefix("/")}"' in page
+        response: Response = self.client.post(path, data={"token": token})
         return response
 
 
@@ -306,7 +315,7 @@ def test_opening_the_confirm_link_does_not_use_it(site: Site) -> None:
 def test_pressing_confirm_makes_the_subscription_active(site: Site) -> None:
     site.subscribe(INSTRUMENT.id, GUARANTOR.email)
 
-    response = site.press_confirm(site.confirm_link())
+    response = site.press_button(site.confirm_link())
 
     assert response.status_code == 200
     assert "Your subscription is active" in visible_text(response.text)
@@ -316,7 +325,7 @@ def test_pressing_confirm_makes_the_subscription_active(site: Site) -> None:
 def test_a_used_confirm_link_shows_a_clear_message(site: Site) -> None:
     site.subscribe(INSTRUMENT.id, GUARANTOR.email)
     link = site.confirm_link()
-    site.press_confirm(link)
+    site.press_button(link)
     token = link.partition("token=")[2]
 
     opened = site.client.get(link)
@@ -363,8 +372,8 @@ def test_signing_up_twice_for_the_same_instrument_keeps_one_subscription(site: S
     site.subscribe(INSTRUMENT.id, GUARANTOR.email.upper())
     second = site.confirm_link()
 
-    site.press_confirm(first)
-    site.press_confirm(second)
+    site.press_button(first)
+    site.press_button(second)
 
     assert first != second
     assert site.store.list_active() == [Subscription(INSTRUMENT.id, GUARANTOR.email)]
@@ -376,7 +385,7 @@ def test_pressing_confirm_after_the_guarantor_changed_activates_nothing(tmp_path
     site.subscribe(INSTRUMENT.id, GUARANTOR.email)
     source.guarantor = OTHER.guarantor
 
-    response = site.press_confirm(site.confirm_link())
+    response = site.press_button(site.confirm_link())
 
     assert response.status_code == 403
     assert "no longer the instrument's guarantor email" in visible_text(response.text)
@@ -391,7 +400,7 @@ def test_pressing_confirm_after_the_instrument_left_the_booking_system_activates
     site.subscribe(INSTRUMENT.id, GUARANTOR.email)
     source.gone = True
 
-    response = site.press_confirm(site.confirm_link())
+    response = site.press_button(site.confirm_link())
 
     assert response.status_code == 403
     assert site.store.list_active() == []
@@ -403,7 +412,7 @@ def test_pressing_confirm_works_when_the_guarantor_email_changed_only_its_case(t
     site.subscribe(INSTRUMENT.id, GUARANTOR.email)
     source.guarantor = Guarantor(GUARANTOR.name, " " + GUARANTOR.email.upper(), GUARANTOR.user_id)
 
-    response = site.press_confirm(site.confirm_link())
+    response = site.press_button(site.confirm_link())
 
     assert response.status_code == 200
     assert site.store.list_active() == [Subscription(INSTRUMENT.id, GUARANTOR.email)]
@@ -416,11 +425,107 @@ def test_pressing_confirm_while_the_booking_system_is_down_keeps_the_link_workin
     link = site.confirm_link()
     source.down = True
 
-    down = site.press_confirm(link)
+    down = site.press_button(link)
 
     assert down.status_code == 503
     assert "try again" in visible_text(down.text)
     assert site.store.list_active() == []
     source.down = False
-    assert site.press_confirm(link).status_code == 200
+    assert site.press_button(link).status_code == 200
     assert site.store.list_active() == [Subscription(INSTRUMENT.id, GUARANTOR.email)]
+
+
+# The unsubscribe link
+
+
+def test_opening_the_unsubscribe_link_does_not_end_the_subscription(site: Site) -> None:
+    sem = site.store.add_active(INSTRUMENT.id, GUARANTOR.email, NOW)
+    link = site.unsubscribe_link(sem)
+
+    # A mail scanner may open the link before the guarantor does.
+    first = site.client.get(link)
+    second = site.client.get(link)
+
+    assert first.status_code == second.status_code == 200
+    assert "Unsubscribe" in visible_text(second.text)
+    assert '<form method="post"' in second.text
+    assert site.store.list_active() == [sem]
+
+
+def test_pressing_unsubscribe_ends_only_that_subscription(site: Site) -> None:
+    sem = site.store.add_active(INSTRUMENT.id, GUARANTOR.email, NOW)
+    lab = site.store.add_active(OTHER.id, GUARANTOR.email, NOW)
+    someone_else = site.store.add_active(INSTRUMENT.id, "ota.zkusebni@example.org", NOW)
+
+    response = site.press_button(site.unsubscribe_link(sem))
+
+    assert response.status_code == 200
+    assert "You are unsubscribed" in visible_text(response.text)
+    assert site.store.list_active() == [lab, someone_else]
+
+
+def test_an_unsubscribe_link_used_again_says_already_unsubscribed(site: Site) -> None:
+    link = site.unsubscribe_link(site.store.add_active(INSTRUMENT.id, GUARANTOR.email, NOW))
+    site.press_button(link)
+
+    opened = site.client.get(link)
+    pressed = site.client.post("/unsubscribe", data={"token": link.partition("token=")[2]})
+
+    for response in (opened, pressed):
+        assert response.status_code == 200
+        assert "Already unsubscribed" in visible_text(response.text)
+        assert "<form" not in response.text
+
+
+def test_the_unsubscribe_link_of_an_older_brief_says_already_unsubscribed(site: Site) -> None:
+    sem = site.store.add_active(INSTRUMENT.id, GUARANTOR.email, NOW)
+    older = site.unsubscribe_link(sem)
+    site.press_button(site.unsubscribe_link(sem))
+
+    response = site.client.get(older)
+
+    assert "Already unsubscribed" in visible_text(response.text)
+
+
+def test_the_unsubscribe_link_after_the_guarantor_changed_says_already_unsubscribed_and_why(site: Site) -> None:
+    sem = site.store.add_active(INSTRUMENT.id, GUARANTOR.email, NOW)
+    link = site.unsubscribe_link(sem)
+    # The Monday job ended it: the booking system has another guarantor email for the instrument now.
+    site.store.end_because_guarantor_changed(sem, NOW)
+
+    opened = site.client.get(link)
+    pressed = site.client.post("/unsubscribe", data={"token": link.partition("token=")[2]})
+
+    for response in (opened, pressed):
+        assert response.status_code == 200
+        text = visible_text(response.text)
+        assert "Already unsubscribed" in text
+        assert "no longer lists this email address as the instrument's guarantor" in text
+        assert "<form" not in response.text
+        # It never says who the guarantor is now, or whose subscription it was.
+        assert "@" not in text
+        assert INSTRUMENT.guarantor.name not in text
+
+
+def test_a_mail_app_can_unsubscribe_with_one_click(site: Site) -> None:
+    # RFC 8058: the mail app posts this body to the link in the List-Unsubscribe header.
+    sem = site.store.add_active(INSTRUMENT.id, GUARANTOR.email, NOW)
+    lab = site.store.add_active(OTHER.id, GUARANTOR.email, NOW)
+
+    response = site.client.post(site.unsubscribe_link(sem), data={"List-Unsubscribe": "One-Click"})
+
+    assert response.status_code == 200
+    assert site.store.list_active() == [lab]
+
+
+@pytest.mark.parametrize("link", ["/unsubscribe?token=made-up-token", "/unsubscribe"])
+def test_an_unknown_unsubscribe_link_shows_a_clear_message(site: Site, link: str) -> None:
+    sem = site.store.add_active(INSTRUMENT.id, GUARANTOR.email, NOW)
+
+    opened = site.client.get(link)
+    pressed = site.client.post(link)
+
+    for response in (opened, pressed):
+        assert response.status_code == 404
+        assert "not valid" in visible_text(response.text)
+    assert site.store.list_active() == [sem]

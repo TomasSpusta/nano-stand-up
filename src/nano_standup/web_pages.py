@@ -5,7 +5,7 @@ from html import escape
 from typing import assert_never
 
 from nano_standup.domain import InstrumentName
-from nano_standup.subscriptions import ConfirmLinkProblem
+from nano_standup.subscriptions import ConfirmLinkProblem, UnsubscribeLinkProblem
 
 STYLE = (
     "body{margin:0;padding:0 1rem;background:#f4f4f5;color:#1a1a1a;line-height:1.5;"
@@ -91,8 +91,7 @@ def confirm_unavailable_page() -> str:
 
 def confirm_problem_page(problem: ConfirmLinkProblem) -> str:
     """Why the confirm link cannot be used."""
-    title, text = _confirm_problem_message(problem)
-    return _page(title, f"<p>{escape(text)}</p>")
+    return _message_page(*_confirm_problem_message(problem))
 
 
 def _confirm_problem_message(problem: ConfirmLinkProblem) -> tuple[str, str]:
@@ -116,11 +115,67 @@ def _confirm_problem_message(problem: ConfirmLinkProblem) -> tuple[str, str]:
             assert_never(problem)
 
 
+def unsubscribe_button_page(token: str) -> str:
+    """Opening the link only shows this page. Mail scanners open links too, so only the button uses the token."""
+    return _page(
+        "Unsubscribe",
+        "<p>Press Unsubscribe to stop getting this weekly brief. Only the brief you got this link in stops.</p>"
+        '<form method="post" action="unsubscribe">'
+        f'<input type="hidden" name="token" value="{escape(token)}">'
+        '<button type="submit">Unsubscribe</button>'
+        "</form>",
+    )
+
+
+# The unsubscribe pages say nothing about other subscriptions: whoever has the link sees only what the brief
+# already showed.
+def unsubscribed_page() -> str:
+    return _message_page(
+        "Unsubscribed",
+        "You are unsubscribed. No more of these weekly briefs will come. To get them again, subscribe again.",
+    )
+
+
+def unsubscribe_problem_page(problem: UnsubscribeLinkProblem) -> str:
+    """Why the unsubscribe link cannot end a subscription."""
+    return _message_page(*_unsubscribe_problem_message(problem))
+
+
+def _unsubscribe_problem_message(problem: UnsubscribeLinkProblem) -> tuple[str, str]:
+    # A match, not a dict, so the type checker fails when a new problem has no message.
+    match problem:
+        case UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED:
+            return (
+                "Already unsubscribed",
+                "This subscription has already ended, so nothing changed. If you subscribed again since,"
+                " use the unsubscribe link in your latest brief.",
+            )
+        case UnsubscribeLinkProblem.GUARANTOR_CHANGED:
+            # Never says who the guarantor is now.
+            return (
+                "Already unsubscribed",
+                "This subscription has already ended, so nothing changed: the booking system no longer lists this"
+                " email address as the instrument's guarantor. If you are still the guarantor, subscribe again with"
+                " the email address the booking system has for you.",
+            )
+        case UnsubscribeLinkProblem.UNKNOWN:
+            return (
+                "Link not valid",
+                "This unsubscribe link is not valid. Check that you opened the whole link from the email.",
+            )
+        case _:
+            assert_never(problem)
+
+
 def unavailable_page() -> str:
     return _page(
         "Please try again later",
         "<p>This page cannot reach the booking system right now. Please try again in a few minutes.</p>",
     )
+
+
+def _message_page(title: str, text: str) -> str:
+    return _page(title, f"<p>{escape(text)}</p>")
 
 
 def _page(title: str, body: str) -> str:

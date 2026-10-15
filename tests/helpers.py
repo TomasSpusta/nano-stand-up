@@ -1,8 +1,11 @@
 """Test helpers and made-up fixtures. Never put real data from the booking system here: the repo is public."""
 
+import smtplib
 from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
+from email.message import EmailMessage
 from html.parser import HTMLParser
+from types import TracebackType
 
 from nano_standup.domain import (
     Certificate,
@@ -20,6 +23,7 @@ GUARANTOR_USER_ID = "user-Hana Testova"
 GUARANTOR = Guarantor(name="Hana Testova", email="hana.testova@example.org", user_id=GUARANTOR_USER_ID)
 INSTRUMENT = Instrument(id="instr-1", name="Test Electron Microscope", alias="TEST-SEM", guarantor=GUARANTOR)
 WORKING_HOURS = WorkingHours(time(7, 0), time(19, 0))
+UNSUBSCRIBE_LINK = "https://standup.example.org/unsubscribe?token=test-token"
 HEADS_UP_SETTINGS = HeadsUpSettings(working_hours=WORKING_HOURS, new_user_reservations=3)
 # Valid from long ago and never ends.
 OLD_CERTIFICATE = Certificate(valid_from=date(2020, 1, 1), valid_to=None)
@@ -81,3 +85,53 @@ def heads_up_text(text: str, html: str) -> str:
     section = " ".join(" ".join(lines[start + 1 : lines.index("", start)]).split())
     assert f"Heads-up {section}" in visible_text(html)
     return section
+
+
+class FakeSmtpConnection:
+    """One connection to the fake SMTP server. Records the calls in order."""
+
+    def __init__(self, server: "FakeSmtpServer", host: str, port: int, timeout: float) -> None:
+        self._server = server
+        self.connected_to = (host, port, timeout)
+        self.calls: list[str] = []
+        self.login_args: tuple[str, str] | None = None
+        self.sent: list[EmailMessage] = []
+
+    def __enter__(self) -> "FakeSmtpConnection":
+        return self
+
+    def __exit__(
+        self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None
+    ) -> None:
+        self.calls.append("quit")
+
+    def starttls(self) -> None:
+        self.calls.append("starttls")
+
+    def login(self, user: str, password: str) -> None:
+        self.calls.append("login")
+        self.login_args = (user, password)
+
+    def send_message(self, message: EmailMessage) -> None:
+        self.calls.append("send")
+        if self._server.refusal is not None:
+            raise smtplib.SMTPRecipientsRefused({str(message["To"]): self._server.refusal})
+        self.sent.append(message)
+
+
+class FakeSmtpServer:
+    """Stands in for the mail server, the network edge. `connect` takes the place of smtplib.SMTP."""
+
+    def __init__(self) -> None:
+        self.connections: list[FakeSmtpConnection] = []
+        # The server's answer to every recipient address, as smtplib gives it, or None to take them.
+        self.refusal: tuple[int, bytes] | None = None
+
+    def connect(self, host: str, port: int, timeout: float) -> FakeSmtpConnection:
+        connection = FakeSmtpConnection(self, host, port, timeout)
+        self.connections.append(connection)
+        return connection
+
+    @property
+    def sent(self) -> list[EmailMessage]:
+        return [message for connection in self.connections for message in connection.sent]

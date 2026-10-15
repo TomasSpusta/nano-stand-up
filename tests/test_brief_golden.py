@@ -15,7 +15,15 @@ import pytest
 from nano_standup.brief import Brief, build_brief
 from nano_standup.domain import Certificate, Reservation, ReservationStatus, UserFacts, Week
 
-from helpers import GUARANTOR, GUARANTOR_USER_ID, HEADS_UP_SETTINGS, INSTRUMENT, experienced_users, reservation
+from helpers import (
+    GUARANTOR,
+    GUARANTOR_USER_ID,
+    HEADS_UP_SETTINGS,
+    INSTRUMENT,
+    UNSUBSCRIBE_LINK,
+    experienced_users,
+    reservation,
+)
 
 GOLDEN = Path(__file__).parent / "golden"
 WEEK = Week(date(2026, 10, 19))
@@ -68,7 +76,9 @@ FULL_WEEK_USER_FACTS = {
 
 
 def _brief(reservations: list[Reservation]) -> Brief:
-    return build_brief(INSTRUMENT, WEEK, reservations, FULL_WEEK_USER_FACTS, BUILT_AT, HEADS_UP_SETTINGS)
+    return build_brief(
+        INSTRUMENT, WEEK, reservations, FULL_WEEK_USER_FACTS, BUILT_AT, HEADS_UP_SETTINGS, UNSUBSCRIBE_LINK
+    )
 
 
 def _golden_path(name: str) -> Path:

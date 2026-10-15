@@ -2,6 +2,7 @@
 
 Before each brief it checks that the subscriber is still the instrument's guarantor.
 If not, the subscription ends and the subscriber gets a short stop notice instead of the brief.
+Each brief that goes out has a new unsubscribe link for its subscription; a stop notice has none.
 
 The server timer starts it once, at 08:00 Prague time.
 A brief or stop notice that fails is tried again at each RETRY_INTERVAL mark of the Prague clock until RETRY_DEADLINE,
@@ -14,6 +15,7 @@ import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
+from enum import Enum
 
 from nano_standup.booking_api import BookingAccessDenied, BookingApiError, BookingDataError
 from nano_standup.booking_source import BookingSource, InstrumentNotFound
@@ -73,10 +75,12 @@ def run_monday_job(
     from_address: str,
     service_admin_email: str,
     heads_up_settings: HeadsUpSettings,
+    unsubscribe_link_for: Callable[[str], str],
 ) -> MondayJobResult:
     """Send the briefs not yet sent this week, with retries. The week is the one that holds today in Prague.
 
     A run started after the deadline, such as a manual re-run, tries each brief once.
+    `unsubscribe_link_for` turns a token into the unsubscribe link of a brief.
     """
     started = clock().astimezone(PRAGUE)
     week = Week.containing(started.date())
@@ -89,6 +93,7 @@ def run_monday_job(
         clock=clock,
         from_address=from_address,
         heads_up_settings=heads_up_settings,
+        unsubscribe_link_for=unsubscribe_link_for,
         week=week,
     )
     active = subscriptions.list_active()
@@ -233,6 +238,7 @@ class _SubscriptionStep:
     clock: Clock
     from_address: str
     heads_up_settings: HeadsUpSettings
+    unsubscribe_link_for: Callable[[str], str]
     week: Week
 
     def try_each(self, subscriptions: list[Subscription], outcome: _Outcome, to_retry: _ToRetry) -> None:
@@ -248,9 +254,11 @@ class _SubscriptionStep:
                 instrument_name = instrument.label
                 if not is_still_guarantor(subscription, instrument):
                     self.end(subscription, instrument, outcome, to_retry)
-                elif self.send(subscription, instrument):
+                    continue
+                sent = self.send(subscription, instrument)
+                if sent is _Sent.SENT:
                     outcome.sent += 1
-                else:
+                elif sent is _Sent.BY_ANOTHER_RUN:
                     outcome.sent_by_another_run += 1
             except PERMANENT_ERRORS as error:
                 failure = SendFailure(subscription, instrument_name, str(error))
@@ -267,6 +275,17 @@ class _SubscriptionStep:
                 )
                 log.error(
                     "Could not end the subscription for %s, so no brief was sent: %s",
+                    failure.describe(),
+                    error.__cause__,
+                )
+                to_retry.briefs.append(failure)
+            except _NoUnsubscribeLink as error:
+                # Tried again, as for _NotEnded.
+                failure = SendFailure(
+                    subscription, instrument_name, f"Could not store the unsubscribe link: {error.__cause__}"
+                )
+                log.error(
+                    "Could not store the unsubscribe link for %s, so no brief was sent: %s",
                     failure.describe(),
                     error.__cause__,
                 )
@@ -329,21 +348,39 @@ class _SubscriptionStep:
             return
         log.info("Sent the stop notice for %s", notice.describe())
 
-    def send(self, subscription: Subscription, instrument: Instrument) -> bool:
-        """Build, send, and record the brief. False when another run sent it meanwhile, so it was not sent again.
+    def send(self, subscription: Subscription, instrument: Instrument) -> "_Sent":
+        """Build, send, and record the brief, with a new unsubscribe link for it.
 
-        Raises _NotRecorded when the brief went out but the record of sent briefs could not save it.
+        Sends nothing when another run sent it meanwhile, or when the subscription ended meanwhile.
+        Raises _NoUnsubscribeLink when the database could not store the unsubscribe link, so no brief went out,
+        and _NotRecorded when the brief went out but the record of sent briefs could not save it.
         """
         reservations = self.source.get_reservations(instrument.id, self.week)
         user_facts = _user_facts(self.source, instrument.id, reservations)
-        # Built now, not at the start of the run, so a late brief shows when it was really built.
-        brief = build_brief(
-            instrument, self.week, reservations, user_facts, built_at=self.clock(), settings=self.heads_up_settings
-        )
         # Checked again just before sending: another run may have sent it since this run started.
         if self.sent_briefs.was_sent(subscription, self.week):
             log.info("Brief for %s to %s was sent by another run meanwhile", instrument.label, subscription.email)
-            return False
+            return _Sent.BY_ANOTHER_RUN
+        # Made only for a brief about to be sent, so an ended subscription never gets one. A brief sent again on
+        # a retry gets a new link. A send that fails leaves a link nobody got, which is harmless.
+        try:
+            token = self.subscriptions.unsubscribe_token(subscription, self.clock())
+        except sqlite3.Error as error:
+            raise _NoUnsubscribeLink from error
+        if token is None:
+            log.info("Subscription for %s to %s ended meanwhile", instrument.label, subscription.email)
+            return _Sent.SUBSCRIPTION_ENDED
+        unsubscribe_link = self.unsubscribe_link_for(token)
+        # Built now, not at the start of the run, so a late brief shows when it was really built.
+        brief = build_brief(
+            instrument,
+            self.week,
+            reservations,
+            user_facts,
+            built_at=self.clock(),
+            settings=self.heads_up_settings,
+            unsubscribe_link=unsubscribe_link,
+        )
         self.mail_sender.send(
             Message(
                 from_address=self.from_address,
@@ -351,6 +388,7 @@ class _SubscriptionStep:
                 subject=brief.subject,
                 html=brief.html,
                 text=brief.text,
+                unsubscribe_link=unsubscribe_link,
             )
         )
         log.info("Sent brief for %s to %s", instrument.label, subscription.email)
@@ -364,7 +402,24 @@ class _SubscriptionStep:
                 error,
             )
             raise _NotRecorded from error
-        return True
+        return _Sent.SENT
+
+
+class _Sent(Enum):
+    """What `_SubscriptionStep.send` did."""
+
+    SENT = "sent"
+    # Another run sent the brief after this run started, so this run did not.
+    BY_ANOTHER_RUN = "sent by another run"
+    # The subscription ended after this run started, for example by its unsubscribe link, so no brief went out.
+    SUBSCRIPTION_ENDED = "subscription ended"
+
+
+class _NoUnsubscribeLink(Exception):
+    """The database could not store the brief's unsubscribe link, so the brief did not go out.
+
+    The cause holds the database error.
+    """
 
 
 class _NotEnded(Exception):

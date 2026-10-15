@@ -1,4 +1,5 @@
 import logging
+import re
 import sqlite3
 from contextlib import closing
 from dataclasses import replace
@@ -22,7 +23,7 @@ from nano_standup.domain import (
 from nano_standup.mail import InMemoryMailSender, MailSender, Message, RecipientRefused
 from nano_standup.monday_job import MondayJobResult, run_monday_job
 from nano_standup.sent_briefs import SentBriefStore
-from nano_standup.subscriptions import Subscription, SubscriptionStore
+from nano_standup.subscriptions import Subscription, SubscriptionStore, UnsubscribeLinkProblem
 
 from helpers import (
     GUARANTOR,
@@ -46,6 +47,9 @@ OTHER = Instrument(
 JANA = "user-Jana Smyslena"
 KAREL = "user-Karel Neexistujici"
 CERTIFIED_IN_OCTOBER = Certificate(valid_from=date(2026, 10, 1), valid_to=date(2027, 10, 1))
+# Hana is the guarantor of both test instruments.
+HANAS_OTHER = replace(OTHER, guarantor=GUARANTOR)
+UNSUBSCRIBE_LINK_PATTERN = re.compile(r"https://standup\.example\.org/unsubscribe\?token=([A-Za-z0-9_-]+)")
 
 
 class FakeTime:
@@ -175,7 +179,27 @@ def _run(
         from_address="standup@example.org",
         service_admin_email="service-admin@example.org",
         heads_up_settings=HEADS_UP_SETTINGS,
+        unsubscribe_link_for=lambda token: f"https://standup.example.org/unsubscribe?token={token}",
     )
+
+
+def _unsubscribe_token(message: Message) -> str:
+    """The token of the one unsubscribe link in a brief, the same in both versions and in the mail headers."""
+    [token] = UNSUBSCRIBE_LINK_PATTERN.findall(message.text)
+    link = f"https://standup.example.org/unsubscribe?token={token}"
+    assert link in message.html
+    # Mail apps show their own unsubscribe button for it.
+    assert message.unsubscribe_link == link
+    return str(token)
+
+
+def _unsubscribe_links(database: Path, instrument_id: str) -> int:
+    """How many unsubscribe links the database has for the instrument's subscriptions."""
+    with closing(sqlite3.connect(database)) as db:
+        [count] = db.execute(
+            "SELECT COUNT(*) FROM unsubscribe_link WHERE instrument_id = ?", (instrument_id,)
+        ).fetchone()
+    return int(count)
 
 
 def _earlier_reservations(user_name: str) -> list[Reservation]:
@@ -720,6 +744,11 @@ def test_a_subscriber_no_longer_the_guarantor_gets_a_stop_notice_and_no_brief(
     notice, brief = mail_sender.sent
     assert (notice.to, notice.from_address) == ("hana.testova@example.org", "standup@example.org")
     assert notice.subject == "Your brief for TEST-SEM has stopped"
+    # The subscription has already ended, so the stop notice has no unsubscribe link and no unsubscribe headers.
+    assert notice.unsubscribe_link is None
+    assert "unsubscribe" not in notice.text.lower()
+    assert "unsubscribe" not in notice.html.lower()
+    assert _unsubscribe_links(database, INSTRUMENT.id) == 0
     for version in (notice.text, visible_text(notice.html)):
         assert "no longer lists this email address as the guarantor of TEST-SEM" in version
         assert "subscribe again" in version
@@ -1129,3 +1158,143 @@ def test_the_guarantor_own_reservations_never_lack_a_certificate(
 
     assert "HEADS-UP" not in message.text
     assert "No valid certificate" not in visible_text(message.html)
+
+
+def test_each_brief_has_its_own_unsubscribe_link_that_ends_only_its_subscription(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    store = SubscriptionStore(database)
+    store.add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    store.add_active(OTHER.id, "hana.testova@example.org", MONDAY_8AM)
+    mail_sender = InMemoryMailSender()
+
+    _run(FakeBookingSource(instruments=[INSTRUMENT, HANAS_OTHER]), database, mail_sender)
+
+    sem, lab = mail_sender.sent
+    sem_token = _unsubscribe_token(sem)
+    assert sem_token != _unsubscribe_token(lab)
+    assert store.unsubscribe(sem_token, MONDAY_8AM) == Subscription(INSTRUMENT.id, "hana.testova@example.org")
+    assert store.list_active() == [Subscription(OTHER.id, "hana.testova@example.org")]
+
+
+def test_the_next_monday_job_sends_nothing_for_an_unsubscribed_subscription(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    store = SubscriptionStore(database)
+    store.add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    store.add_active(OTHER.id, "hana.testova@example.org", MONDAY_8AM)
+    source = FakeBookingSource(instruments=[INSTRUMENT, HANAS_OTHER])
+    first_week = InMemoryMailSender()
+    _run(source, database, first_week)
+    sem = next(m for m in first_week.sent if "TEST-SEM" in m.subject)
+    store.unsubscribe(_unsubscribe_token(sem), MONDAY_8AM)
+    next_week = InMemoryMailSender()
+
+    _run(source, database, next_week, FakeTime(MONDAY_8AM + timedelta(weeks=1)))
+
+    assert [(m.to, m.subject) for m in next_week.sent] == [
+        ("hana.testova@example.org", "Brief: TEST-LAB - week 26. 10.-1. 11. 2026"),
+    ]
+    # No link for the ended subscription: one per brief sent, so one for TEST-SEM in the first week only.
+    assert _unsubscribe_links(database, INSTRUMENT.id) == 1
+
+
+def test_a_brief_sent_on_a_retry_has_a_working_unsubscribe_link(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    SubscriptionStore(database).add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    time = FakeTime(MONDAY_8AM)
+    mail_sender = FailingMailSender(time, until=MONDAY_8AM + timedelta(minutes=20))
+
+    _run(FakeBookingSource(instruments=[INSTRUMENT]), database, mail_sender, time)
+
+    [brief] = mail_sender.sent
+    assert SubscriptionStore(database).unsubscribe(_unsubscribe_token(brief), time.now) == Subscription(
+        INSTRUMENT.id, "hana.testova@example.org"
+    )
+
+
+def test_a_re_run_makes_no_unsubscribe_link_for_a_brief_already_sent(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    SubscriptionStore(database).add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    source = FakeBookingSource(instruments=[INSTRUMENT])
+    first_run = InMemoryMailSender()
+    _run(source, database, first_run)
+
+    _run(source, database, InMemoryMailSender(), FakeTime(MONDAY_8AM + timedelta(hours=3)))
+
+    assert _unsubscribe_links(database, INSTRUMENT.id) == 1
+    # The link in the brief the first run sent still works.
+    [brief] = first_run.sent
+    assert isinstance(SubscriptionStore(database).check_unsubscribe(_unsubscribe_token(brief)), Subscription)
+
+
+class EndingSubscriptionStore(SubscriptionStore):
+    """The real subscriptions, but another process ends one just after the job lists the active ones."""
+
+    def __init__(self, path: Path, ends: Subscription) -> None:
+        super().__init__(path)
+        self._ends = ends
+
+    def list_active(self) -> list[Subscription]:
+        active = super().list_active()
+        self.end_because_guarantor_changed(self._ends, MONDAY_8AM)
+        return active
+
+
+def test_a_subscription_ended_after_the_job_started_gets_no_brief_and_no_unsubscribe_link(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    store = EndingSubscriptionStore(database, ends=Subscription(INSTRUMENT.id, "hana.testova@example.org"))
+    mail_sender = InMemoryMailSender()
+
+    result = _run(FakeBookingSource(instruments=[INSTRUMENT, OTHER]), database, mail_sender, subscriptions=store)
+
+    assert [m.to for m in mail_sender.sent] == ["ota.zkusebni@example.org"]
+    assert _unsubscribe_links(database, INSTRUMENT.id) == 0
+    assert (result.sent, result.failed) == (1, ())
+
+
+class LinkFailingSubscriptionStore(SubscriptionStore):
+    """The real subscriptions, but the database cannot store an unsubscribe link until a given time."""
+
+    def __init__(self, path: Path, time: FakeTime, until: datetime) -> None:
+        super().__init__(path)
+        self._time = time
+        self._until = until
+
+    def unsubscribe_token(self, subscription: Subscription, now: datetime) -> str | None:
+        if self._time.now < self._until:
+            raise sqlite3.OperationalError("database is locked")
+        return super().unsubscribe_token(subscription, now)
+
+
+def test_an_unsubscribe_link_the_database_cannot_store_holds_the_brief_back_and_is_retried(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    SubscriptionStore(database).add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    time = FakeTime(MONDAY_8AM)
+    store = LinkFailingSubscriptionStore(database, time, until=MONDAY_8AM + timedelta(minutes=10))
+    mail_sender = InMemoryMailSender()
+
+    result = _run(FakeBookingSource(instruments=[INSTRUMENT]), database, mail_sender, time, subscriptions=store)
+
+    [brief] = mail_sender.sent
+    assert "Built on Monday 19. 10. 2026 at 08:15." in brief.text
+    assert (result.sent, result.failed) == (1, ())
+
+
+def test_an_old_unsubscribe_link_cannot_end_the_subscription_after_the_guarantor_changed_and_came_back(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "standup.sqlite3"
+    store = SubscriptionStore(database)
+    store.add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    first_week = InMemoryMailSender()
+    _run(FakeBookingSource(instruments=[INSTRUMENT]), database, first_week)
+    old_token = _unsubscribe_token(first_week.sent[0])
+    # The next week the booking system has another guarantor, so the job ends the subscription.
+    changed = FakeBookingSource(instruments=[_with_guarantor(INSTRUMENT, "Ota Zkusebni", "ota.zkusebni@example.org")])
+    _run(changed, database, InMemoryMailSender(), FakeTime(MONDAY_8AM + timedelta(weeks=1)))
+    assert store.check_unsubscribe(old_token) is UnsubscribeLinkProblem.GUARANTOR_CHANGED
+    # Later Hana is the guarantor again and confirms a new subscription.
+    store.add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM + timedelta(weeks=2))
+
+    assert store.unsubscribe(old_token, MONDAY_8AM + timedelta(weeks=2)) is UnsubscribeLinkProblem.GUARANTOR_CHANGED
+    assert store.list_active() == [Subscription(INSTRUMENT.id, "hana.testova@example.org")]
