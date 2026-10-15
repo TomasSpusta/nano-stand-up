@@ -43,6 +43,7 @@ OUTLOOK_WRAPPER_START = (
     '<!--[if mso]><table role="presentation" width="640" align="center" cellspacing="0" cellpadding="0">'
     "<tr><td><![endif]-->"
 )
+OUTLOOK_WRAPPER_END = "<!--[if mso]></td></tr></table><![endif]-->"
 
 
 @dataclass(frozen=True)
@@ -84,7 +85,7 @@ def brief_html(content: BriefContent) -> str:
       {FOOTER_REMINDER}
     </div>
   </div>
-  <!--[if mso]></td></tr></table><![endif]-->
+  {OUTLOOK_WRAPPER_END}
 </body></html>"""
 
 
@@ -111,11 +112,7 @@ def _heads_ups_html(heads_ups: list[HeadsUp]) -> str:
     """The Heads-up section, or nothing when no rule matches."""
     if not heads_ups:
         return ""
-    sections = "".join(
-        f'<div style="margin-top:8px;"><strong>{html.escape(heads_up.title)}</strong>'
-        f'<ul style="margin:2px 0 0;padding-left:20px;">{_heads_up_items_html(heads_up.items)}</ul></div>'
-        for heads_up in heads_ups
-    )
+    sections = "".join(_heads_up_html(heads_up) for heads_up in heads_ups)
     return (
         f'<div style="background:{AMBER_BACKGROUND};border-left:3px solid {AMBER_TEXT};'
         'border-radius:6px;padding:10px 12px;margin:16px 0 0;font-size:14px;">'
@@ -123,8 +120,13 @@ def _heads_ups_html(heads_ups: list[HeadsUp]) -> str:
     )
 
 
-def _heads_up_items_html(items: list[HeadsUpItem]) -> str:
-    return "".join(_heads_up_item_html(item) for item in items)
+def _heads_up_html(heads_up: HeadsUp) -> str:
+    """One rule's title and the reservations it matched."""
+    items = "".join(_heads_up_item_html(item) for item in heads_up.items)
+    return (
+        f'<div style="margin-top:8px;"><strong>{html.escape(heads_up.title)}</strong>'
+        f'<ul style="margin:2px 0 0;padding-left:20px;">{items}</ul></div>'
+    )
 
 
 def _heads_up_item_html(item: HeadsUpItem) -> str:

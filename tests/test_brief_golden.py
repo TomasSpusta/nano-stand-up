@@ -1,6 +1,6 @@
 """The whole brief, compared with saved copies.
 
-So a change to the brief code cannot change what the guarantor gets by accident.
+The copies make sure a change to the brief code cannot change what the guarantor gets by accident.
 When a change to the brief is on purpose, write new copies with
 `UPDATE_GOLDEN=1 uv run pytest tests/test_brief_golden.py` and check the diff of the files in tests/golden/.
 """

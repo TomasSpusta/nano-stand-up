@@ -29,7 +29,7 @@ dev = [
 ]
 
 [tool.ruff]
-# The code is written wider than the default 88; 120 fits it without a full reformat.
+# The code uses a wide style: long calls and HTML strings read better on one line. 120 keeps that style.
 line-length = 120
 target-version = "py312"
 src = ["src", "tests"]
