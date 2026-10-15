@@ -1,4 +1,6 @@
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -58,6 +60,24 @@ def test_the_confirm_link_works_only_once(store: SubscriptionStore) -> None:
     result = store.confirm(requested.token, NOW)
 
     assert result is ConfirmLinkProblem.USED
+
+
+def test_two_confirms_of_one_token_at_the_same_moment_activate_it_once(tmp_path: Path) -> None:
+    # Two stores on one file, like two web requests in their own threads, such as a double click on Confirm.
+    path = tmp_path / "standup.sqlite3"
+    stores = [SubscriptionStore(path), SubscriptionStore(path)]
+    requested = stores[0].request(SEM, EMAIL, NOW)
+    start = threading.Barrier(len(stores))
+
+    def confirm(store: SubscriptionStore) -> Subscription | ConfirmLinkProblem:
+        start.wait(timeout=5)
+        return store.confirm(requested.token, NOW)
+
+    with ThreadPoolExecutor(len(stores)) as pool:
+        results = list(pool.map(confirm, stores))
+
+    assert sorted(results, key=str) == [ConfirmLinkProblem.USED, Subscription(SEM, EMAIL)]
+    assert stores[0].list_active() == [Subscription(SEM, EMAIL)]
 
 
 def test_an_unknown_token_is_refused(store: SubscriptionStore) -> None:
