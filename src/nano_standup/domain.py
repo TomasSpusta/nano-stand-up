@@ -60,11 +60,6 @@ def require_guarantor(instrument: Instrument, email: str) -> None:
         )
 
 
-def name_is_alias(name: str, alias: str) -> bool:
-    """True for an instrument whose name only repeats its alias, such as "TEST-RFID4", so it is shown once."""
-    return name.strip().casefold() == alias.strip().casefold()
-
-
 @dataclass(frozen=True)
 class InstrumentName:
     """An instrument's id and names, without its guarantor. Enough to pick it from a list."""
@@ -72,6 +67,11 @@ class InstrumentName:
     id: str
     name: str
     alias: str
+
+
+def name_repeats_alias(instrument: Instrument | InstrumentName) -> bool:
+    """True for an instrument whose name only repeats its alias, such as "TEST-RFID4", so it is shown once."""
+    return instrument.name.strip().casefold() == instrument.alias.strip().casefold()
 
 
 class ReservationStatus(Enum):

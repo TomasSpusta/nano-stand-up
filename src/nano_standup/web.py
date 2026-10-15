@@ -23,6 +23,7 @@ from nano_standup.web_pages import (
     confirm_problem_page,
     confirm_unavailable_page,
     confirmed_page,
+    error_page,
     form_page,
     not_the_guarantor_page,
     requested_page,
@@ -33,6 +34,9 @@ from nano_standup.web_pages import (
 )
 
 log = logging.getLogger(__name__)
+
+# No browser keeps a page: a kept page would show an old answer for a link, and the pages carry the secret tokens.
+NO_STORE = {"Cache-Control": "no-store"}
 
 
 def link_problem_status(problem: ConfirmLinkProblem | UnsubscribeLinkProblem) -> int:
@@ -59,11 +63,15 @@ def create_app(requests: SubscriptionRequests) -> FastAPI:
 
     @app.middleware("http")
     async def no_store(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-        """No browser keeps a page: a kept page would show an old answer for a link, and the pages carry the
-        secret tokens."""
         response = await call_next(request)
-        response.headers["Cache-Control"] = "no-store"
+        response.headers.update(NO_STORE)
         return response
+
+    @app.exception_handler(Exception)
+    async def unexpected_error(request: Request, error: Exception) -> HTMLResponse:
+        """Starlette sends this page outside the middleware above, so the page sets NO_STORE itself. The error
+        still goes on to the server log."""
+        return HTMLResponse(error_page(), status_code=500, headers=NO_STORE)
 
     def request_in_background(instrument_id: str, email: str) -> None:
         """Runs after the page is sent, so the page and its timing are the same whether or not the email matched."""

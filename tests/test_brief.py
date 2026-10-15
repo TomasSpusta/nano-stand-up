@@ -64,6 +64,15 @@ def test_hours_booked_under_an_hour_show_in_minutes() -> None:
     assert "13 min booked" in text
 
 
+def test_a_reservation_of_no_time_shows_as_0_min() -> None:
+    reservations = [reservation("2026-10-19T09:00", "2026-10-19T09:00")]
+
+    text = visible_text(_build(reservations).html)
+
+    assert "09:00 to 09:00 0 min" in text
+    assert "0 h booked" in text
+
+
 def test_counts_show_reservations_hours_users_and_reservations_without_an_experiment_plan() -> None:
     reservations = [
         reservation("2026-10-19T09:00", "2026-10-19T12:00", user_name="Petr Vymysleny"),

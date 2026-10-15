@@ -3,7 +3,7 @@
 import smtplib
 from dataclasses import dataclass
 from email.message import EmailMessage
-from email.policy import default
+from email.policy import EmailPolicy
 from typing import Protocol
 
 
@@ -46,9 +46,35 @@ class SmtpSettings:
     starttls: bool = False
 
 
-# Python folds a header longer than 78 characters. A link has no spaces to fold at, so Python would encode the
-# List-Unsubscribe header instead, and mail apps would not see a link there. 998 is the line limit of RFC 5322.
-_POLICY = default.clone(max_line_length=998)
+# The line limit of RFC 5322.
+_MAX_LINE = 998
+
+
+class _MailPolicy(EmailPolicy):
+    """The default mail rules, except that the List-Unsubscribe header is never folded.
+
+    Python folds a header longer than 78 characters. A link has no spaces to fold at, so Python would encode the
+    header instead, and mail apps would not see a link there. Every other header and the body keep the default
+    rules, so non-ASCII text still goes out encoded in short lines.
+    """
+
+    def fold(self, name: str, value: str) -> str:
+        if _keep_unfolded(name, value):
+            return f"{name}: {value}{self.linesep}"
+        folded: str = super().fold(name, value)
+        return folded
+
+    def fold_binary(self, name: str, value: str) -> bytes:
+        if _keep_unfolded(name, value):
+            return self.fold(name, value).encode("ascii")
+        return super().fold_binary(name, value)
+
+
+def _keep_unfolded(name: str, value: str) -> bool:
+    return name.lower() == "list-unsubscribe" and value.isascii() and len(f"{name}: {value}") <= _MAX_LINE
+
+
+_POLICY = _MailPolicy()
 
 
 class SmtpMailSender:

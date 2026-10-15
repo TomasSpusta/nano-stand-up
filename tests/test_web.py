@@ -26,6 +26,7 @@ OTHER = Instrument(
     alias="TEST-LAB",
     guarantor=Guarantor(name="Ota Zkusebni", email="ota.zkusebni@example.org", user_id="user-Ota Zkusebni"),
 )
+SUBSCRIBE_LINK = '<a href="./">Subscribe again</a>'
 CONFIRM_LINK = re.compile(re.escape(BASE_URL) + r"/confirm\?token=([A-Za-z0-9_-]+)")
 
 
@@ -179,10 +180,29 @@ def test_no_page_is_kept_in_a_browser_cache(site: Site) -> None:
         site.client.get("/confirm?token=unknown"),
         site.client.get(site.unsubscribe_link(sem)),
         site.press_button(site.unsubscribe_link(sem)),
+        site.client.get("/no-such-page"),
     ]
 
     for response in responses:
         assert response.headers["Cache-Control"] == "no-store"
+
+
+class BrokenSource(FakeBookingSource):
+    """A booking source with a bug the web app does not expect."""
+
+    def list_subscribable_instruments(self) -> list[InstrumentName]:
+        raise RuntimeError("test bug")
+
+
+def test_an_unexpected_error_shows_an_error_page_that_is_not_kept(tmp_path: Path) -> None:
+    site = Site(tmp_path, BrokenSource([INSTRUMENT]))
+    client = TestClient(site.client.app, raise_server_exceptions=False)
+
+    response = client.get("/")
+
+    assert response.status_code == 500
+    assert "Something went wrong" in visible_text(response.text)
+    assert response.headers["Cache-Control"] == "no-store"
 
 
 def test_the_page_reads_the_instrument_list_once_while_it_is_fresh(tmp_path: Path) -> None:
@@ -238,6 +258,17 @@ def test_the_confirm_mail_escapes_the_instrument_name(site: Site) -> None:
     assert "Test &lt;Chemical&gt; Laboratory" in message.html
     assert "<Chemical>" not in message.html
     assert "Test <Chemical> Laboratory" in message.text
+
+
+def test_the_confirm_mail_names_an_instrument_once_when_its_alias_is_its_name(tmp_path: Path) -> None:
+    rfid = replace(OTHER, name="TEST-RFID", alias="TEST-RFID")
+    site = Site(tmp_path, source=FakeBookingSource([rfid]))
+
+    site.subscribe(rfid.id, rfid.guarantor.email)
+
+    [message] = site.mail.sent
+    assert "brief for TEST-RFID." in message.text
+    assert "TEST-RFID (TEST-RFID)" not in message.text
 
 
 def test_a_non_matching_email_gets_no_mail_and_the_same_page(site: Site) -> None:
@@ -353,14 +384,14 @@ def test_the_check_your_email_page_says_to_press_confirm(site: Site) -> None:
     assert "Your subscription starts when you open that link and press Confirm." in text
 
 
-def test_pages_that_say_subscribe_again_link_to_the_sign_up_page(site: Site) -> None:
+def test_pages_that_say_subscribe_again_link_to_the_subscribe_page(site: Site) -> None:
     sem = site.store.add_active(INSTRUMENT.id, GUARANTOR.email, NOW)
 
     responses = [site.press_button(site.unsubscribe_link(sem)), site.client.get("/confirm?token=unknown")]
 
     for response in responses:
         assert "subscribe again" in visible_text(response.text)
-        assert '<a href="./">' in response.text
+        assert SUBSCRIBE_LINK in response.text
 
 
 def test_a_used_confirm_link_shows_a_clear_message(site: Site) -> None:
@@ -375,6 +406,7 @@ def test_a_used_confirm_link_shows_a_clear_message(site: Site) -> None:
     for response in (opened, pressed):
         assert response.status_code == 410
         assert "already used" in visible_text(response.text)
+        assert SUBSCRIBE_LINK in response.text
 
 
 def test_an_expired_confirm_link_shows_a_clear_message_and_activates_nothing(site: Site) -> None:
@@ -388,6 +420,7 @@ def test_an_expired_confirm_link_shows_a_clear_message_and_activates_nothing(sit
     for response in (opened, pressed):
         assert response.status_code == 410
         assert "expired" in visible_text(response.text)
+        assert SUBSCRIBE_LINK in response.text
     assert site.store.list_active() == []
 
 
@@ -430,6 +463,7 @@ def test_pressing_confirm_after_the_guarantor_changed_activates_nothing(tmp_path
 
     assert response.status_code == 403
     assert "no longer the instrument's guarantor email" in visible_text(response.text)
+    assert SUBSCRIBE_LINK in response.text
     # The page does not say who the guarantor is now.
     assert "zkusebni" not in response.text.lower()
     assert site.store.list_active() == []
@@ -516,6 +550,8 @@ def test_an_unsubscribe_link_used_again_says_already_unsubscribed(site: Site) ->
         assert response.status_code == 200
         assert "Already unsubscribed" in visible_text(response.text)
         assert "<form" not in response.text
+        # It does not say to subscribe again, so it has no link to do it.
+        assert SUBSCRIBE_LINK not in response.text
 
 
 def test_the_unsubscribe_link_of_an_older_brief_says_already_unsubscribed(site: Site) -> None:
@@ -543,6 +579,7 @@ def test_the_unsubscribe_link_after_the_guarantor_changed_says_already_unsubscri
         assert "Already unsubscribed" in text
         assert "no longer lists this email address as the instrument's guarantor" in text
         assert "<form" not in response.text
+        assert SUBSCRIBE_LINK in response.text
         # It never says who the guarantor is now, or whose subscription it was.
         assert "@" not in text
         assert INSTRUMENT.guarantor.name not in text

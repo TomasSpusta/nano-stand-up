@@ -74,6 +74,30 @@ def test_a_long_unsubscribe_link_goes_out_as_plain_text_in_the_header(smtp: Fake
     assert f"List-Unsubscribe: <{link}>\n".encode() in email.as_bytes()
 
 
+def test_other_headers_and_the_body_keep_short_encoded_lines(smtp: FakeSmtpServer) -> None:
+    # Only List-Unsubscribe is kept in one line. Mail servers without 8BITMIME need a 7-bit body, and RFC 2047
+    # keeps each encoded word in a header to 75 characters.
+    czech = "Vymyšlený Testovací Elektronový Mikroskop " * 4
+    message = dataclasses.replace(
+        MESSAGE,
+        subject=f"Brief: {czech}",
+        text=f"{czech}\n",
+        html=f"<p>{czech}</p>",
+        unsubscribe_link="https://standup.example.org/unsubscribe?token=test-token",
+    )
+
+    SmtpMailSender(SmtpSettings(host="localhost", port=1025)).send(message)
+
+    [email] = smtp.connections[0].sent
+    raw = email.as_bytes()
+    assert raw.isascii()
+    assert max(len(line) for line in raw.splitlines()) <= 78
+    assert email["Subject"] == f"Brief: {czech}"
+    plain, rich = email.iter_parts()
+    assert plain["Content-Transfer-Encoding"] != "8bit"
+    assert plain.get_content() == f"{czech}\n"
+
+
 def test_a_message_without_an_unsubscribe_link_gets_no_unsubscribe_headers(smtp: FakeSmtpServer) -> None:
     SmtpMailSender(SmtpSettings(host="localhost", port=1025)).send(MESSAGE)
 

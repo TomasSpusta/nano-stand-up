@@ -12,7 +12,7 @@ from nano_standup.domain import (
     ReservationStatus,
     UserFacts,
     Week,
-    name_is_alias,
+    name_repeats_alias,
 )
 from nano_standup.formatting import day_month, day_month_year, day_name, plural
 from nano_standup.heads_ups import WAITING_FOR_APPROVAL, Finding, HeadsUpRule, HeadsUpSettings, heads_up_rules
@@ -193,7 +193,7 @@ def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
     not_cancelled = [r for r in reservations if not r.is_cancelled]
     cancelled = len(reservations) - len(not_cancelled)
     waiting = sum(1 for r in reservations if WAITING_FOR_APPROVAL.check(r) is not None)
-    booked_seconds = sum(week.time_inside(r).total_seconds() for r in not_cancelled)
+    booked = sum((week.time_inside(r) for r in not_cancelled), timedelta())
     # Reservations with no user id still count each user name once.
     users = len({r.user_id or r.user_name for r in not_cancelled})
     without_experiment_plan = sum(1 for r in reservations if r.is_missing_experiment_plan)
@@ -201,7 +201,8 @@ def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
     waiting_counts = [Count(str(waiting), WAITING_FOR_APPROVAL.title.lower(), needs_action=True)] if waiting else []
     return waiting_counts + [
         Count(str(len(not_cancelled)), plural(len(not_cancelled), "reservation")),
-        Count(_format_length(timedelta(seconds=booked_seconds)), "booked"),
+        # Nothing booked, such as a week of cancelled reservations, is "0 h", not "0 min".
+        Count(_length(booked) if booked else "0 h", "booked"),
         Count(str(users), plural(users, "user")),
         Count(str(without_experiment_plan), "without an experiment plan"),
         Count(str(cancelled), "cancelled"),
@@ -259,7 +260,7 @@ def _row(found: _ReservationFindings, day: date) -> Row:
     return Row(
         status=reservation.status,
         span=_span(reservation, day),
-        length=_length(reservation),
+        length=_length(reservation.duration),
         user_name=reservation.user_name,
         project_code=reservation.project_code,
         experiment_plan=reservation.experiment_plan.strip(),
@@ -306,14 +307,10 @@ def _time_seen_from(moment: datetime, day: date) -> str:
     return f"{_short_day_name(moment.date())} {day_month(moment.date())}{year} {moment:%H:%M}"
 
 
-def _length(reservation: Reservation) -> str:
-    return _format_length(reservation.duration)
-
-
-def _format_length(length: timedelta) -> str:
-    """Under an hour in minutes, "15 min"; longer in hours, "3.5 h". Nothing at all is "0 h"."""
+def _length(length: timedelta) -> str:
+    """Under an hour in minutes, "15 min"; longer in hours, "3.5 h"."""
     minutes = round(length.total_seconds() / 60)
-    if 0 < minutes < 60:
+    if minutes < 60:
         return f"{minutes} min"
     return f"{_format_hours(minutes / 60)} h"
 
@@ -325,7 +322,7 @@ def _format_hours(value: float) -> str:
 
 def _week_line(instrument: Instrument, week: Week) -> str:
     """The alias and the week. The alias is left out when the name above it already is the alias."""
-    alias = "" if name_is_alias(instrument.name, instrument.alias) else f"{instrument.alias} - "
+    alias = "" if name_repeats_alias(instrument) else f"{instrument.alias} - "
     return f"{alias}Monday {day_month(week.monday)} to Sunday {day_month_year(week.sunday)}"
 
 
