@@ -63,3 +63,11 @@ def test_the_brief_is_the_same_as_the_saved_copy(name: str, reservations: list[R
 
     _assert_same_as_saved(f"{name}.html", brief.html)
     _assert_same_as_saved(f"{name}.txt", brief.text)
+
+
+@pytest.mark.usefixtures("czech_time_language")
+def test_the_brief_on_a_server_set_to_czech_is_the_same_as_the_saved_copy() -> None:
+    brief = _brief(FULL_WEEK)
+
+    assert brief.html == (GOLDEN / "full_week.html").read_text(encoding="utf-8")
+    assert brief.text == (GOLDEN / "full_week.txt").read_text(encoding="utf-8")
