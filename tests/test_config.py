@@ -114,6 +114,32 @@ def test_a_working_day_that_ends_before_it_starts_is_named(tmp_path: Path) -> No
         load_settings(write(tmp_path, text), environ={})
 
 
+def test_web_settings_have_defaults_and_no_public_base_url(tmp_path: Path) -> None:
+    settings = load_settings(write(tmp_path, FULL), environ={})
+
+    assert settings.public_base_url is None
+    assert (settings.web_host, settings.web_port) == ("127.0.0.1", 8000)
+
+
+def test_web_settings_can_be_set(tmp_path: Path) -> None:
+    text = FULL + "PUBLIC_BASE_URL=https://standup.example.org/\nWEB_HOST=0.0.0.0\nWEB_PORT=8080\n"
+
+    settings = load_settings(write(tmp_path, text), environ={})
+
+    assert settings.public_base_url == "https://standup.example.org"
+    assert (settings.web_host, settings.web_port) == ("0.0.0.0", 8080)
+
+
+def test_a_public_base_url_without_http_is_named(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="PUBLIC_BASE_URL must start with https:// or http://, got 'standup.org'"):
+        load_settings(write(tmp_path, FULL + "PUBLIC_BASE_URL=standup.org\n"), environ={})
+
+
+def test_a_bad_web_port_is_named(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="WEB_PORT must be a number, got 'web'"):
+        load_settings(write(tmp_path, FULL + "WEB_PORT=web\n"), environ={})
+
+
 def test_the_new_user_limit_can_be_set(tmp_path: Path) -> None:
     settings = load_settings(write(tmp_path, FULL + "NEW_USER_RESERVATIONS=5\n"), environ={})
 

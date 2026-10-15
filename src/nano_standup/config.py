@@ -14,6 +14,11 @@ DEFAULT_WORKING_DAY_START = "07:00"
 DEFAULT_WORKING_DAY_END = "19:00"
 DEFAULT_NEW_USER_RESERVATIONS = "3"
 
+# Used when the settings leave out WEB_HOST or WEB_PORT. Only this server can reach the web app; a proxy in front
+# of it gives HTTPS.
+DEFAULT_WEB_HOST = "127.0.0.1"
+DEFAULT_WEB_PORT = "8000"
+
 
 class ConfigError(ValueError):
     pass
@@ -30,6 +35,12 @@ class Settings:
     database_path: Path
     # The limits of the heads-up rules, such as the working hours.
     heads_up: HeadsUpSettings
+    # The address guarantors open the web app at, without a trailing slash. Confirm links start with it.
+    # Only the web app needs it, so it may be missing for the other commands.
+    public_base_url: str | None
+    # Where the web app listens.
+    web_host: str
+    web_port: int
 
 
 def load_settings(path: Path, environ: Mapping[str, str]) -> Settings:
@@ -45,11 +56,11 @@ def load_settings(path: Path, environ: Mapping[str, str]) -> Settings:
     def optional(key: str) -> str | None:
         return values.get(key, "").strip() or None
 
-    port_text = required("SMTP_PORT")
-    try:
-        port = int(port_text)
-    except ValueError:
-        raise ConfigError(f"Setting SMTP_PORT must be a number, got {port_text!r}") from None
+    def number(key: str, text: str) -> int:
+        try:
+            return int(text)
+        except ValueError:
+            raise ConfigError(f"Setting {key} must be a number, got {text!r}") from None
 
     def clock_time(key: str, default: str) -> time:
         text = optional(key) or default
@@ -75,12 +86,16 @@ def load_settings(path: Path, environ: Mapping[str, str]) -> Settings:
     if starttls_text not in ("true", "false"):
         raise ConfigError(f"Setting SMTP_STARTTLS must be true or false, got {starttls_text!r}")
 
+    public_base_url = optional("PUBLIC_BASE_URL")
+    if public_base_url is not None and not public_base_url.startswith(("https://", "http://")):
+        raise ConfigError(f"Setting PUBLIC_BASE_URL must start with https:// or http://, got {public_base_url!r}")
+
     return Settings(
         booking_api_base_url=required("BOOKING_API_BASE_URL"),
         booking_api_key=required("BOOKING_API_KEY"),
         smtp=SmtpSettings(
             host=required("SMTP_HOST"),
-            port=port,
+            port=number("SMTP_PORT", required("SMTP_PORT")),
             username=optional("SMTP_USERNAME"),
             password=optional("SMTP_PASSWORD"),
             starttls=starttls_text == "true",
@@ -89,6 +104,9 @@ def load_settings(path: Path, environ: Mapping[str, str]) -> Settings:
         service_admin_email=required("SERVICE_ADMIN_EMAIL"),
         database_path=path.parent / required("DATABASE_PATH"),
         heads_up=HeadsUpSettings(working_hours=working_hours, new_user_reservations=int(new_user_text)),
+        public_base_url=public_base_url.rstrip("/") if public_base_url else None,
+        web_host=optional("WEB_HOST") or DEFAULT_WEB_HOST,
+        web_port=number("WEB_PORT", optional("WEB_PORT") or DEFAULT_WEB_PORT),
     )
 
 

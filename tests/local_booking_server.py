@@ -86,7 +86,12 @@ def local_booking_server(
                 self._reply(401, {"error": "Unauthorized"})
                 return
             url = urlsplit(self.path)
-            state.queries.append(parse_qs(url.query))
+            query = parse_qs(url.query)
+            state.queries.append(query)
+            if url.path == "/api/equipment":
+                # The whole list on page 1, without filters. Enough for tests of the wiring.
+                self._reply(200, list(state.instruments.values()) if query.get("page") == ["1"] else [])
+                return
             item = state.instruments.get(url.path.removeprefix("/api/equipment/"))
             if item is None:
                 self._reply(404, {"error": "Not Found"})
