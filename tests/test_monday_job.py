@@ -1,5 +1,6 @@
 import logging
 import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -100,17 +101,15 @@ class RefusingMailSender(InMemoryMailSender):
         super().send(message)
 
 
-class FailingSentBriefStore(SentBriefStore):
-    """The real record of sent briefs, but recording fails for some instruments."""
-
-    def __init__(self, path: Path, failing: set[str]) -> None:
-        super().__init__(path)
-        self._failing = failing
-
-    def record(self, subscription: Subscription, week: Week, sent_at: datetime) -> None:
-        if subscription.instrument_id in self._failing:
-            raise sqlite3.OperationalError("database is locked")
-        super().record(subscription, week, sent_at)
+def _refuse_records(database: Path, instrument_id: str) -> None:
+    """Make the real database refuse to record a sent brief for the instrument, as a full disk would."""
+    SentBriefStore(database)
+    with closing(sqlite3.connect(database)) as db, db:
+        db.execute(
+            "CREATE TRIGGER refuse_record BEFORE INSERT ON sent_brief"
+            f" WHEN NEW.instrument_id = '{instrument_id}'"
+            " BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END"
+        )
 
 
 def _run(
@@ -356,6 +355,18 @@ def test_a_pass_longer_than_the_retry_interval_waits_for_the_next_mark_still_ahe
     assert source.failed_at == [MONDAY_8AM + timedelta(minutes=30 * i) for i in range(5)]
 
 
+def test_a_re_run_on_tuesday_retries_until_10_on_tuesday(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    SubscriptionStore(database).add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    tuesday_8am = MONDAY_8AM + timedelta(days=1)
+    time = FakeTime(tuesday_8am)
+    source = FailingBookingSource(FakeBookingSource(instruments=[INSTRUMENT]), time, failing={INSTRUMENT.id})
+
+    _run(source, database, InMemoryMailSender(), time)
+
+    assert source.failed_at == [tuesday_8am + timedelta(minutes=15 * i) for i in range(9)]
+
+
 def test_one_instrument_failing_does_not_stop_the_others(tmp_path: Path) -> None:
     database = tmp_path / "standup.sqlite3"
     _subscribe_both(database)
@@ -468,19 +479,15 @@ def test_a_brief_sent_but_not_recorded_does_not_stop_the_others_and_is_in_the_er
     time = FakeTime(MONDAY_8AM)
     mail_sender = InMemoryMailSender()
 
-    result = _run(
-        FakeBookingSource(instruments=[INSTRUMENT, OTHER]),
-        database,
-        mail_sender,
-        time,
-        sent_briefs=FailingSentBriefStore(database, failing={INSTRUMENT.id}),
-    )
+    _refuse_records(database, INSTRUMENT.id)
+
+    result = _run(FakeBookingSource(instruments=[INSTRUMENT, OTHER]), database, mail_sender, time)
 
     first, second, error_report = mail_sender.sent
     assert [first.to, second.to] == ["hana.testova@example.org", "ota.zkusebni@example.org"]
     assert error_report.to == "service-admin@example.org"
     assert error_report.subject == "Nano Stand-up: 1 brief sent but not recorded for the week of 19. 10. 2026"
-    assert "TEST-SEM (instr-1) to hana.testova@example.org: database is locked" in error_report.text
+    assert "TEST-SEM (instr-1) to hana.testova@example.org: database or disk is full" in error_report.text
     assert "a re-run sends them again" in error_report.text
     # Sent, so not tried again.
     assert time.now == MONDAY_8AM
@@ -529,7 +536,9 @@ def test_the_error_report_lists_briefs_not_sent_and_briefs_not_recorded(tmp_path
     source = FailingBookingSource(FakeBookingSource(instruments=[INSTRUMENT, OTHER]), time, failing={INSTRUMENT.id})
     mail_sender = InMemoryMailSender()
 
-    _run(source, database, mail_sender, time, sent_briefs=FailingSentBriefStore(database, failing={OTHER.id}))
+    _refuse_records(database, OTHER.id)
+
+    _run(source, database, mail_sender, time)
 
     brief, error_report = mail_sender.sent
     assert error_report.subject == (
@@ -537,7 +546,7 @@ def test_the_error_report_lists_briefs_not_sent_and_briefs_not_recorded(tmp_path
     )
     not_sent, not_recorded = error_report.text.split("sent but not recorded", 1)
     assert "instr-1 to hana.testova@example.org" in not_sent
-    assert "TEST-LAB (instr-2) to ota.zkusebni@example.org: database is locked" in not_recorded
+    assert "TEST-LAB (instr-2) to ota.zkusebni@example.org: database or disk is full" in not_recorded
 
 
 class BrokenBookingSource:
