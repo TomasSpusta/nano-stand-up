@@ -150,8 +150,8 @@ class _Checked:
     """A reservation with what each heads-up rule found about it."""
 
     reservation: Reservation
-    # One for each rule, in the order of the rules. None where the rule does not match.
-    findings: list[Finding | None]
+    # By the rule that found it, in the order of the rules. Only the rules that match.
+    findings: dict[HeadsUpRule, Finding]
 
 
 def brief_content(
@@ -167,7 +167,7 @@ def brief_content(
         raise ValueError(f"built_at must carry a time zone, got {built_at.isoformat()}")
     reservations = sorted(reservations, key=lambda r: r.start)
     rules = heads_up_rules(settings, instrument.guarantor.user_id, user_facts)
-    checked = [_Checked(r, [rule.check(r) for rule in rules]) for r in reservations]
+    checked = [_Checked(r, _findings(r, rules)) for r in reservations]
     built_local = built_at.astimezone(PRAGUE)
     return BriefContent(
         subject=f"Brief: {instrument.alias} - week {_week_span(week)}",
@@ -204,14 +204,24 @@ def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
     ]
 
 
+def _findings(reservation: Reservation, rules: list[HeadsUpRule]) -> dict[HeadsUpRule, Finding]:
+    """What each matching rule found about the reservation, in the order of the rules."""
+    findings = {}
+    for rule in rules:
+        finding = rule.check(reservation)
+        if finding is not None:
+            findings[rule] = finding
+    return findings
+
+
 def _heads_ups(week: Week, rules: list[HeadsUpRule], checked: list[_Checked]) -> list[HeadsUp]:
     """The rules that match, in a fixed order, each with its reservations in the order given."""
     heads_ups = [
         HeadsUp(
             rule.title,
-            [_heads_up_item(c.reservation, finding, week) for c in checked if (finding := c.findings[i]) is not None],
+            [_heads_up_item(c.reservation, c.findings[rule], week) for c in checked if rule in c.findings],
         )
-        for i, rule in enumerate(rules)
+        for rule in rules
     ]
     return [heads_up for heads_up in heads_ups if heads_up.items]
 
@@ -251,7 +261,7 @@ def _row(checked: _Checked, day: date) -> Row:
         experiment_plan=reservation.experiment_plan.strip(),
         note=note if _adds_to(note, reservation.experiment_plan) else "",
         private_note=reservation.private_note.strip(),
-        user_marks=[finding.row_mark for finding in checked.findings if finding is not None and finding.row_mark],
+        user_marks=[finding.row_mark for finding in checked.findings.values() if finding.row_mark],
     )
 
 

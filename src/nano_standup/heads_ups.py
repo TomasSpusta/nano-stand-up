@@ -5,6 +5,7 @@ The brief shows each rule that matches a reservation of the week, in the order g
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import date
 
 from nano_standup.domain import (
     NO_USER_FACTS,
@@ -115,17 +116,16 @@ def _no_valid_certificate(reservation: Reservation, facts: UserFacts, guarantor_
         return None
     if any(certificate.covers(reservation.start) for certificate in facts.certificates):
         return None
-    return Finding(detail=_why_not_valid(facts.certificates, reservation), row_mark=NO_VALID_CERTIFICATE)
+    return Finding(detail=_why_not_valid(facts.certificates, reservation.start.date()), row_mark=NO_VALID_CERTIFICATE)
 
 
-def _why_not_valid(certificates: list[Certificate], reservation: Reservation) -> str:
+def _why_not_valid(certificates: list[Certificate], day: date) -> str:
     """Why no certificate covers the reservation: "missing", "expired 31. 5. 2026", or "valid from 2. 11. 2026".
 
-    "expired" gives the latest end before the reservation. "valid from" gives the earliest start after it.
+    `day` is the reservation's start day. "expired" gives the latest end before it, "valid from" the earliest start.
     """
     if not certificates:
         return "missing"
-    day = reservation.start.date()
     ended = [c.valid_to for c in certificates if c.valid_to is not None and c.valid_to < day]
     if ended:
         return f"expired {day_month_year(max(ended))}"
