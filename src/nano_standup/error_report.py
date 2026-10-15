@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from html import escape
 
 from nano_standup.domain import Week
+from nano_standup.formatting import counted, day_month_year
 from nano_standup.mail import MailSender, Message, RecipientRefused
 from nano_standup.subscriptions import Subscription
-from nano_standup.wording import counted, day_month_year
 
 log = logging.getLogger(__name__)
 

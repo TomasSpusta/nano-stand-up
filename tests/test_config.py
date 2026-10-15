@@ -5,6 +5,7 @@ import pytest
 
 from nano_standup.config import ConfigError, load_settings
 from nano_standup.domain import WorkingHours
+from nano_standup.heads_ups import HeadsUpSettings
 from nano_standup.mail import SmtpSettings
 
 FULL = """
@@ -35,7 +36,7 @@ def test_reads_all_settings_from_the_file(tmp_path: Path) -> None:
     assert settings.service_admin_email == "service-admin@example.org"
     assert settings.database_path == tmp_path / "data/standup.sqlite3"
     # Left out of the file, so the defaults.
-    assert settings.working_hours == WorkingHours(time(7, 0), time(19, 0))
+    assert settings.heads_up == HeadsUpSettings(WorkingHours(time(7, 0), time(19, 0)), new_user_reservations=3)
 
 
 def test_optional_smtp_login_and_starttls(tmp_path: Path) -> None:
@@ -95,7 +96,7 @@ def test_working_hours_can_be_set(tmp_path: Path) -> None:
 
     settings = load_settings(write(tmp_path, text), environ={})
 
-    assert settings.working_hours == WorkingHours(time(8, 0), time(17, 30))
+    assert settings.heads_up.working_hours == WorkingHours(time(8, 0), time(17, 30))
 
 
 @pytest.mark.parametrize("value", ["7", "7:00:00", "25:00", "seven"])
@@ -111,3 +112,15 @@ def test_a_working_day_that_ends_before_it_starts_is_named(tmp_path: Path) -> No
         ConfigError, match="WORKING_DAY_START and WORKING_DAY_END: Working day must start before it ends"
     ):
         load_settings(write(tmp_path, text), environ={})
+
+
+def test_the_new_user_limit_can_be_set(tmp_path: Path) -> None:
+    settings = load_settings(write(tmp_path, FULL + "NEW_USER_RESERVATIONS=5\n"), environ={})
+
+    assert settings.heads_up.new_user_reservations == 5
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "three", "2.5", "²"])
+def test_a_bad_new_user_limit_is_named(tmp_path: Path, value: str) -> None:
+    with pytest.raises(ConfigError, match=f"NEW_USER_RESERVATIONS must be a whole number of 1 or more, got '{value}'"):
+        load_settings(write(tmp_path, FULL + f"NEW_USER_RESERVATIONS={value}\n"), environ={})
