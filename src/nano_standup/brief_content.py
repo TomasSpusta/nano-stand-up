@@ -36,9 +36,12 @@ class Row:
     """One reservation as the brief shows it. Empty strings are left out."""
 
     status: ReservationStatus
+    # The start time, with the start day when the reservation runs in from the previous week: "Sun 22:00".
     start: str
     # The end time, with the end day when it is on a later day: "Tue 13:00".
     end: str
+    # Shown on Monday, though it started in the previous week.
+    runs_in: bool
     length: str
     user_name: str
     project_code: str
@@ -56,9 +59,12 @@ class Row:
         return [LabelledNote("Note", self.note), LabelledNote("Private note", self.private_note)]
 
 
-def time_span(start: str, end: str) -> str:
-    """"15:00 to Tue 13:00". Takes the parts, so the HTML version can keep the end day and time together."""
-    return f"{start} to {end}"
+def time_span(start: str, end: str, runs_in: bool) -> str:
+    """"15:00 to Tue 13:00", or "from Sun 22:00 to 06:00" when the reservation runs in from the previous week.
+
+    Takes the parts, so the HTML version can keep each day and time together.
+    """
+    return f"{'from ' if runs_in else ''}{start} to {end}"
 
 
 @dataclass(frozen=True)
@@ -100,18 +106,21 @@ def brief_content(
         for_whom=f"Weekly brief for {instrument.guarantor.name}",
         instrument_name=instrument.name,
         week_line=f"{instrument.alias} - Monday {_day_month(week.monday)} to Sunday {_day_month(week.sunday)} {week.sunday.year}",
-        counts=_counts(reservations) if reservations else [],
+        counts=_counts(week, reservations) if reservations else [],
         days=_days(week, reservations) if reservations else [],
         built=f"Built on {day_name(built_local.date())} {_day_month(built_local.date())} {built_local.year} at {built_local:%H:%M}.",
     )
 
 
-def _counts(reservations: list[Reservation]) -> list[Count]:
-    """Cancelled reservations count only as cancelled. Requested ones count as reservations too."""
+def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
+    """Cancelled reservations count only as cancelled. Requested ones count as reservations too.
+
+    Hours count only inside the week, for a reservation that runs in from the previous week or past Sunday.
+    """
     active = [r for r in reservations if r.status is not ReservationStatus.CANCELLED]
     cancelled = len(reservations) - len(active)
     requested = sum(1 for r in active if r.status is ReservationStatus.REQUESTED)
-    hours = sum(r.duration.total_seconds() for r in active) / 3600
+    hours = sum(week.time_inside(r).total_seconds() for r in active) / 3600
     # Reservations with no user id still count each user name once.
     users = len({r.user_id or r.user_name for r in active})
     without_experiment_plan = sum(1 for r in active if not r.experiment_plan.strip())
@@ -127,21 +136,26 @@ def _counts(reservations: list[Reservation]) -> list[Count]:
 
 
 def _days(week: Week, reservations: list[Reservation]) -> list[Day]:
-    """Every weekday, empty or not. Weekend days only when they have reservations."""
+    """Every weekday, empty or not. Weekend days only when they have reservations.
+
+    A reservation shows on its start day, or on Monday when it runs in from the previous week.
+    """
     days = []
     for day in week.days():
-        rows = [_row(r) for r in reservations if r.start.date() == day]
+        rows = [_row(r, day) for r in reservations if max(r.start.date(), week.monday) == day]
         if rows or day.weekday() not in WEEKEND:
             days.append(Day(day, rows))
     return days
 
 
-def _row(reservation: Reservation) -> Row:
+def _row(reservation: Reservation, day: date) -> Row:
+    """`day` is the day the row shows on."""
     note = reservation.note.strip()
     return Row(
         status=reservation.status,
-        start=f"{reservation.start:%H:%M}",
-        end=_end(reservation),
+        start=_time_seen_from(reservation.start, day),
+        end=_time_seen_from(reservation.end, day),
+        runs_in=reservation.start.date() < day,
         length=_length(reservation),
         user_name=reservation.user_name,
         project_code=reservation.project_code,
@@ -164,14 +178,13 @@ def _comparable(text: str) -> str:
     return " ".join(text.casefold().split())
 
 
-def _end(reservation: Reservation) -> str:
-    """"11:00". An end on a later day shows the day, "Tue 13:00", and the date too when a week or more later."""
-    start, end = reservation.start, reservation.end
-    if end.date() == start.date():
-        return f"{end:%H:%M}"
-    if end.date() - start.date() < timedelta(days=7):
-        return f"{_short_day_name(end.date())} {end:%H:%M}"
-    return f"{_short_day_name(end.date())} {_day_month(end.date())} {end:%H:%M}"
+def _time_seen_from(moment: datetime, day: date) -> str:
+    """"11:00" on `day`. On another day it shows the day, "Tue 13:00", and the date too when a week or more away."""
+    if moment.date() == day:
+        return f"{moment:%H:%M}"
+    if abs(moment.date() - day) < timedelta(days=7):
+        return f"{_short_day_name(moment.date())} {moment:%H:%M}"
+    return f"{_short_day_name(moment.date())} {_day_month(moment.date())} {moment:%H:%M}"
 
 
 def _length(reservation: Reservation) -> str:

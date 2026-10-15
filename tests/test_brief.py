@@ -333,3 +333,78 @@ def test_the_plain_text_version_of_an_empty_week_says_so() -> None:
 
     assert "No reservations this week." in text
     assert "MONDAY" not in text
+
+
+def test_a_reservation_that_runs_in_from_the_previous_week_shows_on_monday_with_its_start_day() -> None:
+    reservations = [reservation("2026-10-18T22:00", "2026-10-19T06:00", user_name="Jana Smyslena")]
+
+    brief = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT)
+    text = visible_text(brief.html)
+
+    assert "Monday 19. 10. from Sun 22:00 to 06:00 8 h Jana Smyslena" in text
+    assert "MONDAY 19. 10.\n  from Sun 22:00 to 06:00 (8 h)\n    Jana Smyslena" in brief.text
+
+
+def test_a_reservation_that_runs_in_from_the_previous_week_counts_only_its_hours_inside_the_week() -> None:
+    reservations = [reservation("2026-10-18T22:00", "2026-10-19T06:00", user_name="Jana Smyslena")]
+
+    text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
+
+    assert "1 reservation " in text
+    assert "6 h booked" in text
+    assert "1 user " in text
+
+
+def test_a_reservation_that_runs_through_the_whole_week_counts_only_the_hours_inside_it() -> None:
+    reservations = [reservation("2026-10-18T20:00", "2026-10-26T02:00")]
+
+    brief = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT)
+    text = visible_text(brief.html)
+
+    assert "168 h booked" in text
+    assert "from Sun 20:00 to Mon 26. 10. 02:00 174 h" in text
+
+
+def test_a_reservation_that_runs_past_sunday_counts_only_its_hours_inside_the_week() -> None:
+    reservations = [reservation("2026-10-25T20:00", "2026-10-26T02:00")]
+
+    text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
+
+    assert "4 h booked" in text
+    assert "20:00 to Mon 02:00 6 h" in text
+
+
+def test_a_reservation_that_started_a_week_or_more_before_shows_its_start_date() -> None:
+    reservations = [reservation("2026-10-12T09:00", "2026-10-19T10:00")]
+
+    text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
+
+    assert "Monday 19. 10. from Mon 12. 10. 09:00 to 10:00" in text
+
+
+def test_a_cancelled_reservation_that_runs_in_shows_on_monday_and_counts_as_cancelled() -> None:
+    reservations = [reservation("2026-10-18T22:00", "2026-10-19T06:00", status=ReservationStatus.CANCELLED)]
+
+    text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
+
+    assert "from Sun 22:00 to 06:00 8 h Cancelled" in text
+    assert "0 h booked" in text
+    assert "1 cancelled" in text
+
+
+def test_a_requested_reservation_that_runs_in_is_waiting_for_approval() -> None:
+    reservations = [reservation("2026-10-18T22:00", "2026-10-19T06:00", status=ReservationStatus.REQUESTED)]
+
+    text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
+
+    assert "1 waiting for your approval" in text
+    assert "from Sun 22:00 to 06:00 8 h Requested: needs your approval" in text
+    assert "6 h booked" in text
+
+
+def test_the_html_version_keeps_the_start_day_and_time_together() -> None:
+    reservations = [reservation("2026-10-18T22:00", "2026-10-19T06:00")]
+
+    html = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html
+
+    assert "from Sun&nbsp;22:00 to 06:00" in html

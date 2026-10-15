@@ -14,6 +14,7 @@ _Avoid_: Admin, manager, owner, garant
 
 **Brief**:
 The weekly message one guarantor gets about one instrument, listing the reservations from Monday to Sunday of that week.
+A reservation that runs in from the previous week shows on Monday, and it counts only its hours inside the week.
 It shows the reservations as they were when it was built on Monday morning.
 It is sent even when the week has no reservations.
 _Avoid_: Stand-up, report, newsletter

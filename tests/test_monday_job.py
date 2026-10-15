@@ -27,6 +27,8 @@ def test_sends_one_brief_per_active_subscription_to_the_subscriber(tmp_path: Pat
                 reservation("2026-10-20T09:00", "2026-10-20T11:00", user_name="Jana Smyslena"),
                 # The week before: not in this brief.
                 reservation("2026-10-16T09:00", "2026-10-16T11:00", user_name="Karel Neexistujici"),
+                # Runs in from the week before: in this brief.
+                reservation("2026-10-18T22:00", "2026-10-19T06:00", user_name="Eva Testova"),
             ],
         },
     )
@@ -46,6 +48,7 @@ def test_sends_one_brief_per_active_subscription_to_the_subscriber(tmp_path: Pat
     sem_text = visible_text(sent[0].html)
     assert "Jana Smyslena" in sem_text
     assert "Karel Neexistujici" not in sem_text
+    assert "from Sun 22:00 to 06:00" in sem_text
     assert "Built on Monday 19. 10. 2026 at 08:00." in sem_text
     assert "No reservations this week." in visible_text(sent[1].html)
     assert "Jana Smyslena" in sent[0].text

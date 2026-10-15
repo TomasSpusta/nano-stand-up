@@ -28,7 +28,7 @@ def brief_text(content: BriefContent) -> str:
 def _row_text(row: Row) -> list[str]:
     mark = f"[{row.mark}] " if row.mark else ""
     lines = [
-        f"  {mark}{time_span(row.start, row.end)} ({row.length})",
+        f"  {mark}{time_span(row.start, row.end, row.runs_in)} ({row.length})",
         f"    {', '.join(part for part in (row.user_name, row.project_code) if part)}",
         *_indented(row.experiment_plan or NO_EXPERIMENT_PLAN),
     ]

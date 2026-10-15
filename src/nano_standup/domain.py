@@ -103,3 +103,11 @@ class Week:
 
     def days(self) -> list[date]:
         return [self.monday + timedelta(days=i) for i in range(7)]
+
+    def overlaps(self, reservation: Reservation) -> bool:
+        """True when some of the reservation is inside the week. One that ends exactly at Monday 00:00 is not."""
+        return reservation.start < self.end and reservation.end > self.start
+
+    def time_inside(self, reservation: Reservation) -> timedelta:
+        """The part of the reservation inside the week, without any time before Monday or after Sunday."""
+        return max(min(reservation.end, self.end) - max(reservation.start, self.start), timedelta())

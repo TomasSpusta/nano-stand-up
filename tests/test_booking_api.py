@@ -72,7 +72,8 @@ def test_get_reservations_returns_the_instrument_week_with_user_project_and_expe
 
 def test_get_reservations_covers_monday_0000_to_sunday_2359(api: FakeBookingApi) -> None:
     api.reservations = [
-        reservation_json("before", SEM, "2026-10-18T23:00:00", "2026-10-19T01:00:00"),
+        reservation_json("ends-at-monday", SEM, "2026-10-18T22:00:00", "2026-10-19T00:00:00"),
+        reservation_json("runs-in", SEM, "2026-10-18T23:00:00", "2026-10-19T01:00:00"),
         reservation_json("first", SEM, "2026-10-19T00:00:00", "2026-10-19T02:00:00"),
         reservation_json("last", SEM, "2026-10-25T23:59:00", "2026-10-26T01:00:00"),
         reservation_json("after", SEM, "2026-10-26T00:00:00", "2026-10-26T02:00:00"),
@@ -80,7 +81,34 @@ def test_get_reservations_covers_monday_0000_to_sunday_2359(api: FakeBookingApi)
 
     ids = [r.id for r in ApiBookingSource(api).get_reservations(SEM, WEEK)]
 
-    assert ids == ["first", "last"]
+    assert ids == ["runs-in", "first", "last"]
+
+
+def test_get_reservations_finds_the_experiment_plan_of_a_reservation_that_started_weeks_before(api: FakeBookingApi) -> None:
+    api.reservations = [
+        reservation_json("long", SEM, "2026-09-28T09:00:00", "2026-10-20T09:00:00"),
+        reservation_json("short", SEM, "2026-10-21T09:00:00", "2026-10-21T10:00:00"),
+    ]
+    api.recordings = [
+        recording("long", "2026-09-28T09:00:00", "Long annealing run"),
+        recording("short", "2026-10-21T09:00:00", "SEM imaging"),
+    ]
+
+    experiment_plans = {r.id: r.experiment_plan for r in ApiBookingSource(api).get_reservations(SEM, WEEK)}
+
+    assert experiment_plans == {"long": "Long annealing run", "short": "SEM imaging"}
+
+
+def test_get_reservations_reads_recordings_only_near_each_start(api: FakeBookingApi) -> None:
+    api.reservations = [reservation_json("long", SEM, "2024-01-04T09:00:00", "2026-10-20T09:00:00")]
+    api.recordings = [recording("long", "2024-01-04T09:00:00", "Long annealing run")]
+    # Recordings in between: a read from the earliest start to Sunday would page through them all.
+    api.recordings += [recording(f"other-{i}", "2025-06-01T09:00:00", "x") for i in range(120)]
+
+    [reservation] = ApiBookingSource(api).get_reservations(SEM, WEEK)
+
+    assert reservation.experiment_plan == "Long annealing run"
+    assert api.recordings_read == 1
 
 
 def test_get_reservations_reads_every_page_of_50(api: FakeBookingApi) -> None:
@@ -129,11 +157,10 @@ def test_get_reservations_refuses_a_time_with_a_time_zone(api: FakeBookingApi) -
         ApiBookingSource(api).get_reservations(SEM, WEEK)
 
 
-def test_get_reservations_names_the_reservation_when_a_time_is_missing(api: FakeBookingApi) -> None:
-    api.reservations = [reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00")]
-    del api.reservations[0]["scheduledend"]
+def test_get_reservations_names_the_reservation_when_a_time_is_not_a_date(api: FakeBookingApi) -> None:
+    api.reservations = [reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00 or so")]
 
-    with pytest.raises(BookingDataError, match="r1.*scheduledend"):
+    with pytest.raises(BookingDataError, match="r1 has a scheduledend that is not a date and time"):
         ApiBookingSource(api).get_reservations(SEM, WEEK)
 
 
