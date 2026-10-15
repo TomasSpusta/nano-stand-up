@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from nano_standup.cli import main
@@ -42,10 +43,30 @@ def test_a_missing_config_file_exits_with_code_2(tmp_path: Path) -> None:
     assert main(["--config", str(tmp_path / "missing.env"), "run-monday-job"]) == 2
 
 
-def test_an_unexpected_failure_exits_with_code_1(tmp_path: Path) -> None:
+def test_briefs_still_not_sent_at_the_deadline_exit_with_code_3(tmp_path: Path) -> None:
     with local_booking_server({"equip-sem": SEM}) as server:
         config = write_config(tmp_path, server.url)
         main(["--config", str(config), "add-subscription", "equip-sem", "hana.testova@example.org"])
     # The server is stopped now, so the Monday job cannot reach the booking API.
+    # The mail server at port 1 refuses too, so the error report to the service admin fails as well.
+    now = datetime(2026, 10, 19, 6, 0, tzinfo=UTC)  # Monday 08:00 in Prague.
+    waits: list[timedelta] = []
+
+    def sleep(duration: timedelta) -> None:
+        nonlocal now
+        waits.append(duration)
+        now += duration
+
+    code = main(["--config", str(config), "run-monday-job"], clock=lambda: now, sleep=sleep)
+
+    assert code == 3
+    # Retries from 08:15 to 10:00.
+    assert waits == [timedelta(minutes=15)] * 8
+
+
+def test_an_unexpected_failure_exits_with_code_1(tmp_path: Path) -> None:
+    config = write_config(tmp_path, "http://127.0.0.1:1")
+    # A file where the database folder should be.
+    (tmp_path / "data").write_text("")
 
     assert main(["--config", str(config), "run-monday-job"]) == 1
