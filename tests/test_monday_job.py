@@ -130,7 +130,7 @@ def _run(
         clock=time.clock,
         sleep=time.sleep,
         from_address="standup@example.org",
-        service_admin_email="admin@example.org",
+        service_admin_email="service-admin@example.org",
         working_hours=WORKING_HOURS,
     )
 
@@ -320,7 +320,7 @@ def test_a_failure_still_there_at_10_sends_one_error_report_to_the_service_admin
     tries = [MONDAY_8AM + timedelta(minutes=15 * i) for i in range(9)]
     assert source.failed_at == [t for t in tries for _ in (INSTRUMENT, OTHER)]
     [error_report] = mail_sender.sent
-    assert error_report.to == "admin@example.org"
+    assert error_report.to == "service-admin@example.org"
     assert error_report.subject == "Nano Stand-up: 2 briefs not sent for the week of 19. 10. 2026"
     assert "instr-1 to hana.testova@example.org: Booking API request /api/equipment/instr-1 failed" in error_report.text
     assert "instr-2 to ota.zkusebni@example.org: Booking API request /api/equipment/instr-2 failed" in error_report.text
@@ -368,7 +368,7 @@ def test_one_instrument_failing_does_not_stop_the_others(tmp_path: Path) -> None
     brief, error_report = mail_sender.sent
     assert (brief.to, brief.subject) == ("ota.zkusebni@example.org", "Brief: TEST-LAB - week 19.-25. 10. 2026")
     assert "at 08:00." in brief.text
-    assert error_report.to == "admin@example.org"
+    assert error_report.to == "service-admin@example.org"
     assert error_report.subject == "Nano Stand-up: 1 brief not sent for the week of 19. 10. 2026"
     assert "instr-1 to hana.testova@example.org" in error_report.text
     assert "instr-2" not in error_report.text
@@ -386,7 +386,7 @@ def test_a_re_run_after_10_tries_once_then_sends_the_error_report_without_waitin
     _run(source, database, mail_sender, time)
 
     assert source.failed_at == [start]
-    assert [m.to for m in mail_sender.sent] == ["ota.zkusebni@example.org", "admin@example.org"]
+    assert [m.to for m in mail_sender.sent] == ["ota.zkusebni@example.org", "service-admin@example.org"]
 
 
 def test_a_re_run_after_a_failed_run_sends_only_the_missing_brief(tmp_path: Path) -> None:
@@ -448,7 +448,7 @@ def test_a_refused_service_admin_address_logs_the_error_report_it_could_not_send
 ) -> None:
     database = tmp_path / "standup.sqlite3"
     SubscriptionStore(database).add_active("instr-gone", "hana.testova@example.org", MONDAY_8AM)
-    mail_sender = RefusingMailSender("admin@example.org")
+    mail_sender = RefusingMailSender("service-admin@example.org")
 
     result = _run(FakeBookingSource(instruments=[]), database, mail_sender)
 
@@ -478,7 +478,7 @@ def test_a_brief_sent_but_not_recorded_does_not_stop_the_others_and_is_in_the_er
 
     first, second, error_report = mail_sender.sent
     assert [first.to, second.to] == ["hana.testova@example.org", "ota.zkusebni@example.org"]
-    assert error_report.to == "admin@example.org"
+    assert error_report.to == "service-admin@example.org"
     assert error_report.subject == "Nano Stand-up: 1 brief sent but not recorded for the week of 19. 10. 2026"
     assert "TEST-SEM (instr-1) to hana.testova@example.org: database is locked" in error_report.text
     assert "a re-run sends them again" in error_report.text
