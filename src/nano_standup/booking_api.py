@@ -39,6 +39,7 @@ CANCELLED_STATE, CANCELLED_STATUS = 2, 9
 API_TIME = "%Y-%m-%dT%H:%M:%S"
 # A recording starts about when its reservation does. One day of margin each side is enough to find it.
 RECORDING_MARGIN = timedelta(days=1)
+LOGIN_PATH = "/api/login"
 
 
 class BookingApiError(RuntimeError):
@@ -54,6 +55,10 @@ class BookingDataError(RuntimeError):
     """The booking API returned data the service cannot use."""
 
 
+class BookingAccessDenied(RuntimeError):
+    """The booking API refused the API key access to an instrument (HTTP 403). A later try gets the same answer."""
+
+
 class BookingApi(Protocol):
     def get(self, path: str, params: Params) -> Any: ...  # Any: parsed JSON.
 
@@ -66,6 +71,18 @@ class HttpBookingApi:
         self._token: str | None = None
 
     def get(self, path: str, params: Params) -> Any:  # Any: parsed JSON.
+        """A 401 means the token expired, as it can during the Monday job retries: log in again once and repeat."""
+        try:
+            return self._get(path, params)
+        except BookingApiError as error:
+            # A 401 from the login itself means a wrong API key, which a second login does not fix.
+            if error.status != 401 or error.path == LOGIN_PATH:
+                raise
+            log.info("Booking API token refused for %s, logging in again", path)
+            self._token = None
+            return self._get(path, params)
+
+    def _get(self, path: str, params: Params) -> Any:  # Any: parsed JSON.
         query = urllib.parse.urlencode(params, doseq=True)
         request = urllib.request.Request(
             f"{self._base_url}{path}?{query}", headers={"Authorization": f"Bearer {self._login()}"}
@@ -75,11 +92,11 @@ class HttpBookingApi:
     def _login(self) -> str:
         if self._token is None:
             request = urllib.request.Request(
-                f"{self._base_url}/api/login",
+                f"{self._base_url}{LOGIN_PATH}",
                 data=json.dumps({"apiKey": self._api_key}).encode(),
                 headers={"Content-Type": "application/json"},
             )
-            self._token = str(_required(self._send("/api/login", request), "accessToken", "The answer to /api/login"))
+            self._token = str(_required(self._send(LOGIN_PATH, request), "accessToken", f"The answer to {LOGIN_PATH}"))
         return self._token
 
     def _send(self, path: str, request: urllib.request.Request) -> Any:  # Any: parsed JSON.
@@ -110,6 +127,10 @@ class ApiBookingSource:
         except BookingApiError as error:
             if error.status == 404:
                 raise InstrumentNotFound(f"No instrument with id {instrument_id!r} in the booking system") from error
+            if error.status == 403:
+                raise BookingAccessDenied(
+                    f"No access to instrument {instrument_id!r} in the booking system: {error}"
+                ) from error
             raise
         alias = item.get("ge_alias") or ""
         guarantor_json = item.get("ge_ownerid") or {}

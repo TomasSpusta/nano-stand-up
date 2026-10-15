@@ -1,15 +1,16 @@
 import logging
 import sqlite3
+from contextlib import closing
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from nano_standup.booking_api import BookingApiError, BookingDataError
+from nano_standup.booking_api import BookingAccessDenied, BookingApiError, BookingDataError
 from nano_standup.booking_source import BookingSource, FakeBookingSource
 from nano_standup.domain import Guarantor, Instrument, Reservation, ReservationStatus, Week
-from nano_standup.mail import InMemoryMailSender, MailSender, Message
+from nano_standup.mail import InMemoryMailSender, MailSender, Message, RecipientRefused
 from nano_standup.monday_job import MondayJobResult, run_monday_job
 from nano_standup.sent_briefs import SentBriefStore
 from nano_standup.subscriptions import Subscription, SubscriptionStore
@@ -43,19 +44,26 @@ class FailingBookingSource:
     """The fake booking source, but the booking API fails for some instruments until a given time."""
 
     def __init__(
-        self, source: FakeBookingSource, time: FakeTime, failing: set[str], until: datetime | None = None
+        self,
+        source: FakeBookingSource,
+        time: FakeTime,
+        failing: set[str],
+        until: datetime | None = None,
+        takes: timedelta = timedelta(),
     ) -> None:
-        """`until` None means the failure never ends."""
+        """`until` None means the failure never ends. Each failing request moves the clock on by `takes`."""
         self._source = source
         self._time = time
         self._failing = failing
         self._until = until
+        self._takes = takes
         # The times the job asked for a failing instrument, for checking the retries.
         self.failed_at: list[datetime] = []
 
     def _check(self, instrument_id: str) -> None:
         if instrument_id in self._failing and (self._until is None or self._time.now < self._until):
             self.failed_at.append(self._time.now)
+            self._time.now += self._takes
             raise BookingApiError(f"/api/equipment/{instrument_id}", 503, "Service Unavailable")
 
     def get_instrument(self, instrument_id: str) -> Instrument:
@@ -95,17 +103,28 @@ class FailingSubscriptionStore(SubscriptionStore):
         raise sqlite3.OperationalError("database is locked")
 
 
-class FailingSentBriefStore(SentBriefStore):
-    """The real record of sent briefs, but recording fails for some instruments."""
+class RefusingMailSender(InMemoryMailSender):
+    """Keeps the messages in memory, but the mail server refuses one recipient address."""
 
-    def __init__(self, path: Path, failing: set[str]) -> None:
-        super().__init__(path)
-        self._failing = failing
+    def __init__(self, refused: str) -> None:
+        super().__init__()
+        self._refused = refused
 
-    def record(self, subscription: Subscription, week: Week, sent_at: datetime) -> None:
-        if subscription.instrument_id in self._failing:
-            raise sqlite3.OperationalError("database is locked")
-        super().record(subscription, week, sent_at)
+    def send(self, message: Message) -> None:
+        if message.to == self._refused:
+            raise RecipientRefused(f"The mail server refused {message.to}: 550 5.1.1 No such user")
+        super().send(message)
+
+
+def _refuse_records(database: Path, instrument_id: str) -> None:
+    """Make the real database refuse to record a sent brief for the instrument, as a full disk would."""
+    SentBriefStore(database)
+    with closing(sqlite3.connect(database)) as db, db:
+        db.execute(
+            "CREATE TRIGGER refuse_record BEFORE INSERT ON sent_brief"
+            f" WHEN NEW.instrument_id = '{instrument_id}'"
+            " BEGIN SELECT RAISE(ABORT, 'database or disk is full'); END"
+        )
 
 
 def _run(
@@ -126,7 +145,7 @@ def _run(
         clock=time.clock,
         sleep=time.sleep,
         from_address="standup@example.org",
-        service_admin_email="admin@example.org",
+        service_admin_email="service-admin@example.org",
         working_hours=WORKING_HOURS,
     )
 
@@ -316,13 +335,52 @@ def test_a_failure_still_there_at_10_sends_one_error_report_to_the_service_admin
     tries = [MONDAY_8AM + timedelta(minutes=15 * i) for i in range(9)]
     assert source.failed_at == [t for t in tries for _ in (INSTRUMENT, OTHER)]
     [error_report] = mail_sender.sent
-    assert error_report.to == "admin@example.org"
+    assert error_report.to == "service-admin@example.org"
     assert error_report.subject == "Nano Stand-up: 2 briefs not sent for the week of 19. 10. 2026"
     assert "instr-1 to hana.testova@example.org: Booking API request /api/equipment/instr-1 failed" in error_report.text
     assert "instr-2 to ota.zkusebni@example.org: Booking API request /api/equipment/instr-2 failed" in error_report.text
     assert "instr-1 to hana.testova@example.org" in visible_text(error_report.html)
     assert result.sent == 0
     assert [f.subscription.instrument_id for f in result.failed] == [INSTRUMENT.id, OTHER.id]
+
+
+def test_a_job_started_a_few_seconds_late_still_tries_at_10(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    SubscriptionStore(database).add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    start = MONDAY_8AM + timedelta(seconds=5)
+    time = FakeTime(start)
+    source = FailingBookingSource(FakeBookingSource(instruments=[INSTRUMENT]), time, failing={INSTRUMENT.id})
+
+    _run(source, database, InMemoryMailSender(), time)
+
+    # The retries keep to the 15-minute marks of the Prague clock, so the last one is at 10:00.
+    assert source.failed_at == [start] + [MONDAY_8AM + timedelta(minutes=15 * i) for i in range(1, 9)]
+
+
+def test_a_pass_longer_than_the_retry_interval_waits_for_the_next_mark_still_ahead(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    SubscriptionStore(database).add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    time = FakeTime(MONDAY_8AM)
+    # Each try takes 20 minutes, so the 08:15 mark has passed when the first try ends.
+    source = FailingBookingSource(
+        FakeBookingSource(instruments=[INSTRUMENT]), time, failing={INSTRUMENT.id}, takes=timedelta(minutes=20)
+    )
+
+    _run(source, database, InMemoryMailSender(), time)
+
+    assert source.failed_at == [MONDAY_8AM + timedelta(minutes=30 * i) for i in range(5)]
+
+
+def test_a_re_run_on_tuesday_retries_until_10_on_tuesday(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    SubscriptionStore(database).add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    tuesday_8am = MONDAY_8AM + timedelta(days=1)
+    time = FakeTime(tuesday_8am)
+    source = FailingBookingSource(FakeBookingSource(instruments=[INSTRUMENT]), time, failing={INSTRUMENT.id})
+
+    _run(source, database, InMemoryMailSender(), time)
+
+    assert source.failed_at == [tuesday_8am + timedelta(minutes=15 * i) for i in range(9)]
 
 
 def test_one_instrument_failing_does_not_stop_the_others(tmp_path: Path) -> None:
@@ -337,7 +395,7 @@ def test_one_instrument_failing_does_not_stop_the_others(tmp_path: Path) -> None
     brief, error_report = mail_sender.sent
     assert (brief.to, brief.subject) == ("ota.zkusebni@example.org", "Brief: TEST-LAB - week 19.-25. 10. 2026")
     assert "at 08:00." in brief.text
-    assert error_report.to == "admin@example.org"
+    assert error_report.to == "service-admin@example.org"
     assert error_report.subject == "Nano Stand-up: 1 brief not sent for the week of 19. 10. 2026"
     assert "instr-1 to hana.testova@example.org" in error_report.text
     assert "instr-2" not in error_report.text
@@ -355,7 +413,7 @@ def test_a_re_run_after_10_tries_once_then_sends_the_error_report_without_waitin
     _run(source, database, mail_sender, time)
 
     assert source.failed_at == [start]
-    assert [m.to for m in mail_sender.sent] == ["ota.zkusebni@example.org", "admin@example.org"]
+    assert [m.to for m in mail_sender.sent] == ["ota.zkusebni@example.org", "service-admin@example.org"]
 
 
 def test_a_re_run_after_a_failed_run_sends_only_the_missing_brief(tmp_path: Path) -> None:
@@ -413,6 +471,23 @@ def test_a_mail_server_down_all_morning_logs_the_error_report_it_could_not_send(
     )
 
 
+def test_a_refused_service_admin_address_logs_the_error_report_it_could_not_send(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    database = tmp_path / "standup.sqlite3"
+    SubscriptionStore(database).add_active("instr-gone", "hana.testova@example.org", MONDAY_8AM)
+    mail_sender = RefusingMailSender("service-admin@example.org")
+
+    result = _run(FakeBookingSource(instruments=[]), database, mail_sender)
+
+    assert mail_sender.sent == []
+    assert len(result.failed) == 1
+    assert any(
+        r.levelno == logging.ERROR and r.getMessage().startswith("Cannot send the error report to the service admin")
+        for r in caplog.records
+    )
+
+
 def test_a_brief_sent_but_not_recorded_does_not_stop_the_others_and_is_in_the_error_report(
     tmp_path: Path,
 ) -> None:
@@ -421,24 +496,36 @@ def test_a_brief_sent_but_not_recorded_does_not_stop_the_others_and_is_in_the_er
     time = FakeTime(MONDAY_8AM)
     mail_sender = InMemoryMailSender()
 
-    result = _run(
-        FakeBookingSource(instruments=[INSTRUMENT, OTHER]),
-        database,
-        mail_sender,
-        time,
-        sent_briefs=FailingSentBriefStore(database, failing={INSTRUMENT.id}),
-    )
+    _refuse_records(database, INSTRUMENT.id)
+
+    result = _run(FakeBookingSource(instruments=[INSTRUMENT, OTHER]), database, mail_sender, time)
 
     first, second, error_report = mail_sender.sent
     assert [first.to, second.to] == ["hana.testova@example.org", "ota.zkusebni@example.org"]
-    assert error_report.to == "admin@example.org"
+    assert error_report.to == "service-admin@example.org"
     assert error_report.subject == "Nano Stand-up: 1 brief sent but not recorded for the week of 19. 10. 2026"
-    assert "TEST-SEM (instr-1) to hana.testova@example.org: database is locked" in error_report.text
+    assert "TEST-SEM (instr-1) to hana.testova@example.org: database or disk is full" in error_report.text
     assert "a re-run sends them again" in error_report.text
     # Sent, so not tried again.
     assert time.now == MONDAY_8AM
     assert (result.sent, result.failed) == (2, ())
     assert [f.subscription.instrument_id for f in result.not_recorded] == [INSTRUMENT.id]
+
+
+def test_a_refused_recipient_fails_at_once_and_goes_to_the_error_report(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    time = FakeTime(MONDAY_8AM)
+    mail_sender = RefusingMailSender("hana.testova@example.org")
+
+    result = _run(FakeBookingSource(instruments=[INSTRUMENT, OTHER]), database, mail_sender, time)
+
+    brief, error_report = mail_sender.sent
+    assert brief.to == "ota.zkusebni@example.org"
+    assert "TEST-SEM (instr-1) to hana.testova@example.org: " in error_report.text
+    assert "No such user" in error_report.text
+    assert time.now == MONDAY_8AM
+    assert [f.subscription.instrument_id for f in result.failed] == [INSTRUMENT.id]
 
 
 def test_an_instrument_not_in_the_booking_system_fails_at_once_without_retries(tmp_path: Path) -> None:
@@ -466,7 +553,9 @@ def test_the_error_report_lists_briefs_not_sent_and_briefs_not_recorded(tmp_path
     source = FailingBookingSource(FakeBookingSource(instruments=[INSTRUMENT, OTHER]), time, failing={INSTRUMENT.id})
     mail_sender = InMemoryMailSender()
 
-    _run(source, database, mail_sender, time, sent_briefs=FailingSentBriefStore(database, failing={OTHER.id}))
+    _refuse_records(database, OTHER.id)
+
+    _run(source, database, mail_sender, time)
 
     brief, error_report = mail_sender.sent
     assert error_report.subject == (
@@ -474,7 +563,7 @@ def test_the_error_report_lists_briefs_not_sent_and_briefs_not_recorded(tmp_path
     )
     not_sent, not_recorded = error_report.text.split("sent but not recorded", 1)
     assert "instr-1 to hana.testova@example.org" in not_sent
-    assert "TEST-LAB (instr-2) to ota.zkusebni@example.org: database is locked" in not_recorded
+    assert "TEST-LAB (instr-2) to ota.zkusebni@example.org: database or disk is full" in not_recorded
 
 
 class BrokenBookingSource:
@@ -496,8 +585,12 @@ class BrokenBookingSource:
 
 @pytest.mark.parametrize(
     "error",
-    [RuntimeError("Unexpected bug"), BookingDataError("A reservation has no 'id' in the booking API answer")],
-    ids=["unexpected", "bad data"],
+    [
+        RuntimeError("Unexpected bug"),
+        BookingDataError("A reservation has no 'id' in the booking API answer"),
+        BookingAccessDenied("No access to instrument 'instr-1' in the booking system"),
+    ],
+    ids=["unexpected", "bad data", "no access"],
 )
 def test_an_error_a_retry_cannot_fix_goes_straight_to_the_error_report(tmp_path: Path, error: Exception) -> None:
     database = tmp_path / "standup.sqlite3"
@@ -676,7 +769,7 @@ def test_a_stop_notice_that_cannot_be_sent_still_ends_the_subscription_and_is_in
     assert mail_sender.failed_at == [MONDAY_8AM + timedelta(minutes=15 * i) for i in range(9)]
     brief, error_report = mail_sender.sent
     assert brief.to == "ota.zkusebni@example.org"
-    assert error_report.to == "admin@example.org"
+    assert error_report.to == "service-admin@example.org"
     assert error_report.subject == "Nano Stand-up: 1 stop notice not sent for the week of 19. 10. 2026"
     assert "TEST-SEM (instr-1) to hana.testova@example.org: [Errno 111] Connection refused" in error_report.text
     assert "TEST-SEM (instr-1) to hana.testova@example.org" in visible_text(error_report.html)
@@ -687,6 +780,47 @@ def test_a_stop_notice_that_cannot_be_sent_still_ends_the_subscription_and_is_in
         r.levelno == logging.ERROR and "stop notice" in r.getMessage() and "hana.testova@example.org" in r.getMessage()
         for r in caplog.records
     )
+
+
+def test_a_stop_notice_after_a_late_start_is_tried_again_on_the_quarter_hours(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    started = MONDAY_8AM + timedelta(seconds=40)
+    time = FakeTime(started)
+    mail_sender = FailingMailSender(time, until=MONDAY_8AM + timedelta(days=1), only_to="hana.testova@example.org")
+    source = FakeBookingSource(
+        instruments=[_with_guarantor(INSTRUMENT, "Ota Zkusebni", "ota.zkusebni@example.org"), OTHER]
+    )
+
+    result = _run(source, database, mail_sender, time)
+
+    assert mail_sender.failed_at == [started] + [MONDAY_8AM + timedelta(minutes=15 * i) for i in range(1, 9)]
+    assert [f.subscription.instrument_id for f in result.stop_notices_not_sent] == [INSTRUMENT.id]
+
+
+def test_a_stop_notice_to_a_refused_address_fails_at_once_and_goes_to_the_error_report(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    source = FakeBookingSource(
+        instruments=[_with_guarantor(INSTRUMENT, "Ota Zkusebni", "ota.zkusebni@example.org"), OTHER]
+    )
+    time = FakeTime(MONDAY_8AM)
+    mail_sender = RefusingMailSender("hana.testova@example.org")
+
+    result = _run(source, database, mail_sender, time)
+
+    brief, error_report = mail_sender.sent
+    assert brief.to == "ota.zkusebni@example.org"
+    assert error_report.subject == "Nano Stand-up: 1 stop notice not sent for the week of 19. 10. 2026"
+    # Reported as the refusal it is, not as an unexpected error.
+    assert (
+        "TEST-SEM (instr-1) to hana.testova@example.org:"
+        " The mail server refused hana.testova@example.org: 550 5.1.1 No such user"
+    ) in error_report.text
+    assert SubscriptionStore(database).list_active() == [Subscription(OTHER.id, "ota.zkusebni@example.org")]
+    assert (result.sent, result.subscriptions_ended, result.failed) == (1, 1, ())
+    # A retry cannot change the mail server's answer, so the stop notice is not tried again.
+    assert time.now == MONDAY_8AM
 
 
 class EndedByAnotherRunMeanwhile(FakeBookingSource):

@@ -15,6 +15,7 @@ from nano_standup.domain import (
     day_name,
 )
 from nano_standup.heads_ups import WAITING_FOR_APPROVAL, heads_up_rules
+from nano_standup.wording import day_month, day_month_year, plural
 
 NO_EXPERIMENT_PLAN = "No experiment plan given"
 NO_RESERVATIONS_THIS_WEEK = "No reservations this week."
@@ -112,7 +113,7 @@ class Day:
 
     @property
     def heading(self) -> str:
-        return f"{day_name(self.calendar_day)} {_day_month(self.calendar_day)}"
+        return f"{day_name(self.calendar_day)} {day_month(self.calendar_day)}"
 
 
 @dataclass(frozen=True)
@@ -149,7 +150,7 @@ def brief_content(
         subject=f"Brief: {instrument.alias} - week {_week_span(week)}",
         for_whom=f"Weekly brief for {instrument.guarantor.name}",
         instrument_name=instrument.name,
-        week_line=f"{instrument.alias} - Monday {_day_month(week.monday)} to Sunday {_day_month_year(week.sunday)}",
+        week_line=f"{instrument.alias} - Monday {day_month(week.monday)} to Sunday {day_month_year(week.sunday)}",
         counts=_counts(week, reservations) if reservations else [],
         heads_ups=_heads_ups(week, reservations, working_hours),
         days=_days(week, reservations) if reservations else [],
@@ -172,9 +173,9 @@ def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
     # Shown only when there is something to approve, and first, because it asks the guarantor to act.
     waiting_counts = [Count(str(waiting), WAITING_FOR_APPROVAL.title.lower(), needs_action=True)] if waiting else []
     return waiting_counts + [
-        Count(str(len(not_cancelled)), _plural(len(not_cancelled), "reservation")),
+        Count(str(len(not_cancelled)), plural(len(not_cancelled), "reservation")),
         Count(f"{_format_hours(hours)} h", "booked"),
-        Count(str(users), _plural(users, "user")),
+        Count(str(users), plural(users, "user")),
         Count(str(without_experiment_plan), "without an experiment plan"),
         Count(str(cancelled), "cancelled"),
     ]
@@ -191,7 +192,7 @@ def _heads_ups(week: Week, reservations: list[Reservation], working_hours: Worki
 
 def _heads_up_item(reservation: Reservation, week: Week) -> HeadsUpItem:
     day = _shown_on(reservation, week)
-    return HeadsUpItem(f"{_short_day_name(day)} {_day_month(day)}", _span(reservation, day), reservation.user_name)
+    return HeadsUpItem(f"{_short_day_name(day)} {day_month(day)}", _span(reservation, day), reservation.user_name)
 
 
 def _shown_on(reservation: Reservation, week: Week) -> date:
@@ -258,7 +259,7 @@ def _time_seen_from(moment: datetime, day: date) -> str:
     if abs(moment.date() - day) < timedelta(days=7):
         return f"{_short_day_name(moment.date())} {moment:%H:%M}"
     year = f" {moment.year}" if moment.year != day.year else ""
-    return f"{_short_day_name(moment.date())} {_day_month(moment.date())}{year} {moment:%H:%M}"
+    return f"{_short_day_name(moment.date())} {day_month(moment.date())}{year} {moment:%H:%M}"
 
 
 def _length(reservation: Reservation) -> str:
@@ -267,10 +268,6 @@ def _length(reservation: Reservation) -> str:
     if minutes < 60:
         return f"{minutes} min"
     return f"{_format_hours(minutes / 60)} h"
-
-
-def _plural(count: int, word: str) -> str:
-    return word if count == 1 else f"{word}s"
 
 
 def _format_hours(value: float) -> str:
@@ -282,10 +279,10 @@ def _week_span(week: Week) -> str:
     """The week as "19.-25. 10. 2026", or "28. 9.-4. 10. 2026" when the week spans two months."""
     monday, sunday = week.monday, week.sunday
     if monday.year != sunday.year:
-        return f"{_day_month_year(monday)}-{_day_month_year(sunday)}"
+        return f"{day_month_year(monday)}-{day_month_year(sunday)}"
     if monday.month != sunday.month:
-        return f"{_day_month(monday)}-{_day_month_year(sunday)}"
-    return f"{monday.day}.-{_day_month_year(sunday)}"
+        return f"{day_month(monday)}-{day_month_year(sunday)}"
+    return f"{monday.day}.-{day_month_year(sunday)}"
 
 
 def _short_day_name(day: date) -> str:
@@ -293,15 +290,6 @@ def _short_day_name(day: date) -> str:
     return day_name(day)[:3]
 
 
-def _day_month(day: date) -> str:
-    return f"{day.day}. {day.month}."
-
-
-def _day_month_year(day: date) -> str:
-    """A day with its year, such as "20. 10. 2026"."""
-    return f"{_day_month(day)} {day.year}"
-
-
 def _full_date(day: date) -> str:
     """A day with its name and year, such as "Tuesday 20. 10. 2026"."""
-    return f"{day_name(day)} {_day_month_year(day)}"
+    return f"{day_name(day)} {day_month_year(day)}"

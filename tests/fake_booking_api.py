@@ -28,9 +28,13 @@ class FakeBookingApi:
         self.recordings: list[dict[str, Any]] = []  # Any: mirrors the API's JSON.
         # How many recordings the pages of /api/recording held, to check that reads stay small.
         self.recordings_read = 0
+        # Instrument ids the API key has no access to.
+        self.forbidden: set[str] = set()
 
     def get(self, path: str, params: Params) -> Any:  # Any: mirrors the JSON shape of the real API.
         if path.startswith("/api/equipment/"):
+            if path.removeprefix("/api/equipment/") in self.forbidden:
+                raise BookingApiError(path, 403, "Forbidden")
             item = self.instruments.get(path.removeprefix("/api/equipment/"))
             if item is None:
                 raise BookingApiError(path, 404, "Not Found")

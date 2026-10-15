@@ -78,6 +78,7 @@ Before each brief, the job checks that the subscriber's email is still the instr
 If not (the guarantor changed, or the guarantor's email changed), no brief goes out and the subscription ends.
 The old address gets a short stop notice instead, once: an ended subscription is not checked again.
 If the stop notice cannot be sent, the subscription still ends, and the stop notice is tried again like a brief (see below).
+A stop notice to an address the mail server refuses for good is not tried again.
 A stop notice still not sent at 10:00 is listed in the error report; a re-run does not send it.
 If the database cannot end the subscription, no brief goes out, and it is tried again like a brief.
 The log names each ended subscription by instrument and old address.
@@ -86,14 +87,16 @@ The database keeps ended subscriptions.
 A database file from an older version is upgraded the first time this version opens it, and it keeps its subscriptions.
 
 When the booking API or the mail server fails for a brief or a stop notice, the job tries it again every 15 minutes, up to 10:00 Prague time.
+The retries keep to the quarter hours of the Prague clock (08:15, 08:30, and so on), so the last one is at 10:00 even when the job started a few seconds late.
+The 10:00 deadline is 10:00 Prague time on the day of the run, so a re-run on Tuesday at 08:00 retries until Tuesday 10:00.
 One failing instrument does not stop the briefs for the others.
-Other errors fail at once, with no retries: an instrument the booking system no longer has, booking data a brief cannot use, or an unexpected error.
+Other errors fail at once, with no retries: an instrument the booking system no longer has, an instrument the API key has no access to, booking data a brief cannot use, a recipient address the mail server refuses for good, or an unexpected error.
 Briefs that still fail at 10:00 go to the service admin in one error report, which lists the failed instruments (by alias and id when known) and their errors.
 The same report lists the stop notices that could not be sent.
 
 Each sent brief is recorded per subscription and week.
 So running the job again by hand sends only the briefs not sent yet that week.
-A run started after 10:00 tries each brief once, with no waiting.
+A run started after 10:00 on its day tries each brief once, with no waiting.
 Only one Monday job runs at a time: it holds a lock file next to the database (`<database>.monday-job.lock`).
 A run started while another one runs sends nothing and exits with code 4.
 
