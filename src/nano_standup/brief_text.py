@@ -7,6 +7,7 @@ from nano_standup.brief_content import (
     NO_RESERVATIONS_THIS_WEEK,
     BriefContent,
     Row,
+    time_span,
 )
 
 
@@ -27,14 +28,13 @@ def brief_text(content: BriefContent) -> str:
 def _row_text(row: Row) -> list[str]:
     mark = f"[{row.mark}] " if row.mark else ""
     lines = [
-        f"  {mark}{row.start} to {row.end} ({row.length})",
+        f"  {mark}{time_span(row.start, row.end)} ({row.length})",
         f"    {', '.join(part for part in (row.user_name, row.project_code) if part)}",
         *_indented(row.experiment_plan or NO_EXPERIMENT_PLAN),
     ]
-    if row.note:
-        lines += _indented(f"Note: {row.note}")
-    if row.private_note:
-        lines += _indented(f"Private note: {row.private_note}")
+    for note in row.notes:
+        if note.text:
+            lines += _indented(f"{note.label}: {note.text}")
     return lines
 
 

@@ -2,7 +2,14 @@ from datetime import date, datetime
 
 import pytest
 
-from nano_standup.booking_api import ApiBookingSource, BookingDataError
+from nano_standup.booking_api import (
+    CANCELLED_STATE,
+    CANCELLED_STATUS,
+    REQUESTED_STATUS,
+    RESERVED_STATUS,
+    ApiBookingSource,
+    BookingDataError,
+)
 from nano_standup.booking_source import InstrumentNotFound
 from nano_standup.domain import Guarantor, ReservationStatus, Week
 
@@ -11,6 +18,8 @@ from fake_booking_api import FakeBookingApi, guarantor_json, instrument_json, re
 
 LAB = "equip-lab"
 WEEK = Week(date(2026, 10, 19))
+# A statuscode the booking system does not use for reservations.
+UNKNOWN_STATUS = 7
 
 
 @pytest.fixture
@@ -137,9 +146,9 @@ def test_get_instrument_names_the_instrument_when_its_id_is_missing(api: FakeBoo
 
 def test_get_reservations_reads_status_note_and_private_note(api: FakeBookingApi) -> None:
     api.reservations = [
-        reservation_json("reserved", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", statuscode=4, note=None, private_note=None),
-        reservation_json("requested", SEM, "2026-10-21T09:00:00", "2026-10-21T10:00:00", statuscode=1, note="Bring own holder"),
-        reservation_json("cancelled", SEM, "2026-10-22T09:00:00", "2026-10-22T10:00:00", statuscode=9, private_note="Paid by the group"),
+        reservation_json("reserved", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", statuscode=RESERVED_STATUS, note=None, private_note=None),
+        reservation_json("requested", SEM, "2026-10-21T09:00:00", "2026-10-21T10:00:00", statuscode=REQUESTED_STATUS, note="Bring own holder"),
+        reservation_json("cancelled", SEM, "2026-10-22T09:00:00", "2026-10-22T10:00:00", statuscode=CANCELLED_STATUS, private_note="Paid by the group"),
     ]
 
     reservations = {r.id: r for r in ApiBookingSource(api).get_reservations(SEM, WEEK)}
@@ -155,8 +164,8 @@ def test_get_reservations_reads_status_note_and_private_note(api: FakeBookingApi
 
 
 def test_get_reservations_treats_a_cancelled_state_as_cancelled_whatever_its_status(api: FakeBookingApi) -> None:
-    api.reservations = [reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", statuscode=4)]
-    api.reservations[0]["statecode"] = 2
+    api.reservations = [reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", statuscode=RESERVED_STATUS)]
+    api.reservations[0]["statecode"] = CANCELLED_STATE
 
     [reservation] = ApiBookingSource(api).get_reservations(SEM, WEEK)
 
@@ -166,9 +175,9 @@ def test_get_reservations_treats_a_cancelled_state_as_cancelled_whatever_its_sta
 def test_get_reservations_logs_an_unknown_status_and_shows_it_as_reserved(
     api: FakeBookingApi, caplog: pytest.LogCaptureFixture
 ) -> None:
-    api.reservations = [reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", statuscode=7)]
+    api.reservations = [reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", statuscode=UNKNOWN_STATUS)]
 
     [reservation] = ApiBookingSource(api).get_reservations(SEM, WEEK)
 
     assert reservation.status is ReservationStatus.RESERVED
-    assert "Reservation r1 has an unknown statuscode 7" in caplog.text
+    assert f"Reservation r1 has an unknown statuscode {UNKNOWN_STATUS}" in caplog.text

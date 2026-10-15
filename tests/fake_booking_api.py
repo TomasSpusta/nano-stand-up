@@ -5,7 +5,9 @@ from typing import Any
 from nano_standup.booking_api import (
     CANCELLED_STATE,
     CANCELLED_STATUS,
+    REQUESTED_STATE,
     REQUESTED_STATUS,
+    RESERVED_STATE,
     RESERVED_STATUS,
     BookingApiError,
     Params,
@@ -16,7 +18,7 @@ MAX_PAGE_SIZE = 50  # The real API fails with a server error on larger pages whe
 # It works on a single reservation.
 LIST_SCOPES_THAT_FAIL = {"ge_realised_for_contactid"}
 # The statecode that goes with each statuscode, as in real data.
-STATECODES = {RESERVED_STATUS: 3, REQUESTED_STATUS: 0, CANCELLED_STATUS: CANCELLED_STATE}
+STATECODES = {RESERVED_STATUS: RESERVED_STATE, REQUESTED_STATUS: REQUESTED_STATE, CANCELLED_STATUS: CANCELLED_STATE}
 
 
 class FakeBookingApi:

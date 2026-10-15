@@ -26,13 +26,12 @@ log = logging.getLogger(__name__)
 Params = dict[str, str | int | list[str]]
 
 PAGE_SIZE = 50
-# Reservation (statecode, statuscode) pairs in the booking system, which is built on Microsoft Dynamics:
-# (0, 1) requested, (3, 4) reserved, (2, 9) cancelled. Only these three were seen in real data.
-# The booking system labels them "Požadováno" (Requested) and "Rezervováno" (Reserved).
-CANCELLED_STATE = 2
-CANCELLED_STATUS = 9
-REQUESTED_STATUS = 1
-RESERVED_STATUS = 4
+# Reservation statecode and statuscode in the booking system, which is built on Microsoft Dynamics.
+# Only these three pairs were seen in real data.
+# The booking system labels the first two "Rezervováno" (Reserved) and "Požadováno" (Requested).
+RESERVED_STATE, RESERVED_STATUS = 3, 4
+REQUESTED_STATE, REQUESTED_STATUS = 0, 1
+CANCELLED_STATE, CANCELLED_STATUS = 2, 9
 # A recording starts about when its reservation does. One day of margin each side is enough to find it.
 RECORDING_MARGIN = timedelta(days=1)
 
