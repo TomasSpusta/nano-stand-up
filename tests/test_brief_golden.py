@@ -47,13 +47,17 @@ def _brief(reservations: list[Reservation]) -> Brief:
     return build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT)
 
 
+def _golden_path(name: str) -> Path:
+    return GOLDEN / name
+
+
 def _saved(name: str) -> str:
-    return (GOLDEN / name).read_text(encoding="utf-8")
+    return _golden_path(name).read_text(encoding="utf-8")
 
 
 def _assert_same_as_saved(name: str, actual: str) -> None:
     if os.environ.get("UPDATE_GOLDEN"):
-        (GOLDEN / name).write_text(actual, encoding="utf-8")
+        _golden_path(name).write_text(actual, encoding="utf-8")
     assert actual == _saved(name)
 
 

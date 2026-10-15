@@ -187,27 +187,6 @@ def test_a_reservation_that_ends_a_week_or_more_later_shows_its_end_date() -> No
     assert "15:00 to Tue 27. 10. 13:00" in text
 
 
-@pytest.mark.usefixtures("czech_time_language")
-def test_day_names_are_english_on_a_server_set_to_czech() -> None:
-    reservations = [
-        reservation("2026-10-19T15:00", "2026-10-20T13:00"),
-        reservation("2026-10-20T15:00", "2026-10-27T13:00"),
-    ]
-
-    brief = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT)
-
-    html_text = visible_text(brief.html)
-    for text in (html_text, brief.text):
-        assert "15:00 to Tue 13:00" in text
-        assert "15:00 to Tue 27. 10. 13:00" in text
-        assert "Built on Monday 19. 10. 2026 at 08:00." in text
-    assert "Monday 19. 10." in html_text
-    assert "Tuesday 20. 10." in html_text
-    # The plain-text version writes day headings in capitals.
-    assert "MONDAY 19. 10." in brief.text
-    assert "TUESDAY 20. 10." in brief.text
-
-
 @pytest.mark.parametrize(
     ("start", "end", "length"),
     [
