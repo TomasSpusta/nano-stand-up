@@ -119,13 +119,13 @@ class ChangingSource(FakeBookingSource):
     def __init__(self) -> None:
         super().__init__([INSTRUMENT, OTHER])
         self.guarantor: Guarantor | None = None
-        self.removed = False
+        self.gone = False
         self.down = False
 
     def get_instrument(self, instrument_id: str) -> Instrument:
         if self.down:
             raise BookingApiError(f"/api/equipment/{instrument_id}", None, "Connection refused")
-        if self.removed:
+        if self.gone:
             raise InstrumentNotFound(f"No instrument with id {instrument_id!r}")
         instrument = super().get_instrument(instrument_id)
         return replace(instrument, guarantor=self.guarantor) if self.guarantor else instrument
@@ -384,7 +384,7 @@ def test_pressing_confirm_after_the_instrument_left_the_booking_system_activates
     source = ChangingSource()
     site = Site(tmp_path, source)
     site.subscribe(INSTRUMENT.id, GUARANTOR.email)
-    source.removed = True
+    source.gone = True
 
     response = site.press_confirm(site.confirm_link())
 
