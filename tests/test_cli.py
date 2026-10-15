@@ -1,4 +1,10 @@
 from pathlib import Path
+from typing import Any
+
+import pytest
+import uvicorn
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from nano_standup.cli import main
 from nano_standup.subscriptions import Subscription, SubscriptionStore
@@ -49,3 +55,29 @@ def test_an_unexpected_failure_exits_with_code_1(tmp_path: Path) -> None:
     # The server is stopped now, so the Monday job cannot reach the booking API.
 
     assert main(["--config", str(config), "run-monday-job"]) == 1
+
+
+def test_serve_runs_the_web_app_with_the_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    started: dict[str, Any] = {}  # Any: the arguments uvicorn.run got.
+
+    def fake_run(app: FastAPI, host: str, port: int) -> None:
+        started.update(app=app, host=host, port=port)
+
+    monkeypatch.setattr(uvicorn, "run", fake_run)
+    with local_booking_server({"equip-sem": SEM}) as server:
+        config = write_config(tmp_path, server.url)
+        with config.open("a") as file:
+            file.write("PUBLIC_BASE_URL=https://standup.example.org\nWEB_PORT=8081\n")
+        code = main(["--config", str(config), "serve"])
+        page = TestClient(started["app"]).get("/")
+
+    assert code == 0
+    assert (started["host"], started["port"]) == ("127.0.0.1", 8081)
+    assert "TEST-SEM - Test Electron Microscope" in page.text
+
+
+def test_serve_without_a_public_base_url_exits_with_code_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: pytest.fail("the web app must not start"))
+    config = write_config(tmp_path, "http://127.0.0.1:1")
+
+    assert main(["--config", str(config), "serve"]) == 2

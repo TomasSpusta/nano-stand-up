@@ -55,7 +55,7 @@ Start Mailpit, a local mail catcher, so no real guarantor gets mail while testin
 docker run -d --name nano-standup-mailpit -p 127.0.0.1:8025:8025 -p 127.0.0.1:1025:1025 axllent/mailpit
 ```
 
-Add a subscription (the email must be the instrument's guarantor email in the booking system):
+Add a subscription by hand, without a confirm link (the email must be the instrument's guarantor email in the booking system):
 
 ```bash
 uv run nano-standup add-subscription <instrument-id> <guarantor-email>
@@ -68,3 +68,23 @@ uv run nano-standup run-monday-job
 ```
 
 Read them at http://localhost:8025.
+
+### Web app
+
+Guarantors subscribe on a small web page.
+They pick an instrument and enter their email.
+When the email is the instrument's guarantor email in the booking system, a confirm link goes to that email.
+The subscription starts when they open the link.
+
+Set `PUBLIC_BASE_URL` in `.env` to the address the page is opened at, for example `http://localhost:8000` when testing.
+Confirm links start with it.
+`WEB_HOST` and `WEB_PORT` (default 127.0.0.1 and 8000) set where the app listens.
+In production it runs behind an HTTPS proxy.
+
+```bash
+uv run nano-standup serve
+```
+
+Open http://localhost:8000.
+The page loads the instrument list from the booking API, which takes a few seconds.
+With Mailpit running, the confirm emails show at http://localhost:8025.
