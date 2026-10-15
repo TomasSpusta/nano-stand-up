@@ -28,4 +28,3 @@ def heads_up_rules(working_hours: WorkingHours) -> list[HeadsUpRule]:
         # The guarantor can re-plan a freed slot.
         HeadsUpRule("Cancelled", lambda reservation: not reservation.will_happen),
     ]
-

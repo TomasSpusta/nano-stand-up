@@ -43,6 +43,17 @@ The part at the top of a brief that holds the week's heads-ups.
 The brief leaves it out when no rule matches.
 _Avoid_: Heads-up box
 
+**Working hours**:
+The normal working day, Monday to Friday, from 07:00 to 19:00 unless the settings `WORKING_DAY_START` and `WORKING_DAY_END` say otherwise.
+A reservation is inside them only when it starts and ends on the same weekday, within these times.
+Times compare to the minute, as the brief shows them.
+_Avoid_: Office hours, business hours, opening hours
+
+**After-hours safety check**:
+The extra safety check a guarantor may need to arrange for a reservation outside working hours.
+A cancelled reservation needs none, so it is never listed under "Outside working hours".
+_Avoid_: Night check, overtime check
+
 **Reservation**:
 A booked time slot on an instrument for a user and a project.
 Its status is reserved (the normal case, "Rezervováno" in the booking system), requested, or cancelled.
