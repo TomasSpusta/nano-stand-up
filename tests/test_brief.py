@@ -128,7 +128,8 @@ def test_a_cancelled_reservation_is_crossed_out_marked_and_counted_apart() -> No
     assert "0 without an experiment plan" in text
     assert "1 cancelled" in text
     assert "13:00 to 15:00 2 h Cancelled Jana Smyslena" in text
-    row = html[html.index("13:00 to 15:00") - 300 : html.index("Jana Smyslena")]
+    # The last match is the row: the Heads-up box above it names the same time and user.
+    row = html[html.rindex("13:00 to 15:00") - 300 : html.rindex("Jana Smyslena")]
     assert "line-through" in row
 
 
@@ -143,7 +144,8 @@ def test_a_requested_reservation_is_marked_highlighted_and_still_counted() -> No
     assert "09:00 to 12:00 3 h Requested: needs your approval Jana Smyslena" in text
     assert "1 reservation " in text
     assert "0 cancelled" in text
-    row = html[html.index("09:00 to 12:00") - 300 : html.index("Jana Smyslena")]
+    # The last match is the row: the Heads-up box above it names the same time and user.
+    row = html[html.rindex("09:00 to 12:00") - 300 : html.rindex("Jana Smyslena")]
     assert "background:#fffbeb" in row
 
 
@@ -299,6 +301,16 @@ TEST-SEM - Monday 19. 10. to Sunday 25. 10. 2026
 
 1 waiting for your approval, 2 reservations, 22.5 h booked, 2 users, 1 without an experiment plan, 1 cancelled
 
+HEADS-UP
+  Waiting for your approval
+    Tue 20. 10. 09:00 to 09:30, Karel Neexistujici
+  No experiment plan
+    Tue 20. 10. 09:00 to 09:30, Karel Neexistujici
+  Outside working hours (07:00 to 19:00, Monday to Friday)
+    Tue 20. 10. 15:00 to Wed 13:00, Jana Smyslena
+  Cancelled
+    Thu 22. 10. 09:00 to 10:00, Petr Vymysleny
+
 MONDAY 19. 10.
   No reservations
 
@@ -416,3 +428,128 @@ def test_a_reservation_that_started_in_an_earlier_year_shows_the_year() -> None:
     text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
 
     assert "Monday 19. 10. from Thu 4. 1. 2024 09:00 to 10:00" in text
+
+
+def _heads_up_text(html: str) -> str:
+    """The visible text of the Heads-up box, which sits between the counts and the first day."""
+    text = visible_text(html)
+    return text[text.index("Heads-up") : text.index("Monday 19. 10.", text.index("Heads-up"))]
+
+
+def test_a_reservation_without_an_experiment_plan_is_a_heads_up() -> None:
+    reservations = [
+        reservation("2026-10-19T09:00", "2026-10-19T10:00", user_name="Petr Vymysleny"),
+        reservation("2026-10-20T13:00", "2026-10-20T14:30", user_name="Jana Smyslena", experiment_plan=" "),
+    ]
+
+    heads_up = _heads_up_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
+
+    assert "No experiment plan Tue 20. 10. 13:00 to 14:30, Jana Smyslena" in heads_up
+    assert "Petr Vymysleny" not in heads_up
+
+
+def test_the_heads_up_box_is_left_out_when_no_rule_matches() -> None:
+    reservations = [reservation("2026-10-19T07:00", "2026-10-19T19:00")]
+
+    brief = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT)
+
+    assert "Heads-up" not in brief.html
+    assert "HEADS-UP" not in brief.text
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "item"),
+    [
+        ("2026-10-19T06:59", "2026-10-19T10:00", "Mon 19. 10. 06:59 to 10:00, Jana Smyslena"),
+        ("2026-10-19T17:00", "2026-10-19T19:01", "Mon 19. 10. 17:00 to 19:01, Jana Smyslena"),
+        # Overnight.
+        ("2026-10-20T22:00", "2026-10-21T02:00", "Tue 20. 10. 22:00 to Wed 02:00, Jana Smyslena"),
+        ("2026-10-20T17:00", "2026-10-21T00:00", "Tue 20. 10. 17:00 to Wed 00:00, Jana Smyslena"),
+        ("2026-10-23T18:00", "2026-10-24T01:00", "Fri 23. 10. 18:00 to Sat 01:00, Jana Smyslena"),
+        # Weekend.
+        ("2026-10-24T10:00", "2026-10-24T12:00", "Sat 24. 10. 10:00 to 12:00, Jana Smyslena"),
+        ("2026-10-25T10:00", "2026-10-25T12:00", "Sun 25. 10. 10:00 to 12:00, Jana Smyslena"),
+        # Runs in from the previous week: it shows on Monday, as in the list.
+        ("2026-10-18T22:00", "2026-10-19T06:00", "Mon 19. 10. from Sun 22:00 to 06:00, Jana Smyslena"),
+    ],
+)
+def test_a_reservation_outside_working_hours_is_a_heads_up(start: str, end: str, item: str) -> None:
+    reservations = [reservation(start, end, user_name="Jana Smyslena")]
+
+    heads_up = _heads_up_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
+
+    assert f"Outside working hours (07:00 to 19:00, Monday to Friday) {item}" in heads_up
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        ("2026-10-19T07:00", "2026-10-19T19:00"),
+        ("2026-10-19T07:00", "2026-10-19T08:00"),
+        ("2026-10-19T18:00", "2026-10-19T19:00"),
+        ("2026-10-23T10:00", "2026-10-23T12:00"),
+    ],
+)
+def test_a_reservation_inside_working_hours_is_not_a_heads_up(start: str, end: str) -> None:
+    brief = build_brief(INSTRUMENT, WEEK, [reservation(start, end)], BUILT_AT)
+
+    assert "Outside working hours" not in brief.html
+    assert "Outside working hours" not in brief.text
+
+
+def test_a_cancelled_reservation_needs_no_experiment_plan_and_no_after_hours_check() -> None:
+    reservations = [
+        reservation("2026-10-24T22:00", "2026-10-25T02:00", experiment_plan="", status=ReservationStatus.CANCELLED)
+    ]
+
+    heads_up = _heads_up_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
+
+    assert "No experiment plan" not in heads_up
+    assert "Outside working hours" not in heads_up
+
+
+def test_cancelled_and_requested_reservations_are_heads_ups() -> None:
+    reservations = [
+        reservation("2026-10-19T09:00", "2026-10-19T10:00", user_name="Petr Vymysleny"),
+        reservation("2026-10-20T09:00", "2026-10-20T10:00", user_name="Jana Smyslena", status=ReservationStatus.CANCELLED),
+        reservation(
+            "2026-10-21T09:00", "2026-10-21T10:00", user_name="Karel Neexistujici", status=ReservationStatus.REQUESTED
+        ),
+    ]
+
+    heads_up = _heads_up_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
+
+    assert "Cancelled Tue 20. 10. 09:00 to 10:00, Jana Smyslena" in heads_up
+    assert "Waiting for your approval Wed 21. 10. 09:00 to 10:00, Karel Neexistujici" in heads_up
+    assert "Petr Vymysleny" not in heads_up
+
+
+def test_reservations_that_are_neither_cancelled_nor_requested_are_not_heads_ups() -> None:
+    reservations = [reservation("2026-10-19T09:00", "2026-10-19T10:00", experiment_plan="")]
+
+    heads_up = _heads_up_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
+
+    assert "Cancelled" not in heads_up
+    assert "Waiting for your approval" not in heads_up
+
+
+def test_the_plain_text_version_shows_the_heads_ups_between_the_counts_and_the_days() -> None:
+    reservations = [
+        reservation("2026-10-19T09:00", "2026-10-19T10:00", user_name="Petr Vymysleny", experiment_plan=""),
+        reservation("2026-10-20T06:00", "2026-10-20T08:00", user_name="Jana Smyslena", experiment_plan=""),
+    ]
+
+    text = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).text
+
+    assert """\
+2 reservations, 3 h booked, 2 users, 2 without an experiment plan, 0 cancelled
+
+HEADS-UP
+  No experiment plan
+    Mon 19. 10. 09:00 to 10:00, Petr Vymysleny
+    Tue 20. 10. 06:00 to 08:00, Jana Smyslena
+  Outside working hours (07:00 to 19:00, Monday to Friday)
+    Tue 20. 10. 06:00 to 08:00, Jana Smyslena
+
+MONDAY 19. 10.
+""" in text

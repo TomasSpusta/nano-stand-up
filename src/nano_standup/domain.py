@@ -14,6 +14,8 @@ Clock = Callable[[], datetime]
 
 # Day names written out, because `%A` and `%a` follow the server's time language.
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+# Saturday and Sunday, as date.weekday() gives them.
+WEEKEND = {5, 6}
 
 
 def day_name(day: date) -> str:

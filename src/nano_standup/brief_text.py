@@ -6,6 +6,7 @@ from nano_standup.brief_content import (
     NO_RESERVATIONS_THIS_DAY,
     NO_RESERVATIONS_THIS_WEEK,
     BriefContent,
+    HeadsUp,
     Row,
     time_span,
 )
@@ -15,6 +16,7 @@ def brief_text(content: BriefContent) -> str:
     lines = [content.for_whom, content.instrument_name, content.week_line, ""]
     if content.has_reservations:
         lines += [", ".join(f"{count.value} {count.label}" for count in content.counts), ""]
+        lines += _heads_ups_text(content.heads_ups)
     else:
         lines += [NO_RESERVATIONS_THIS_WEEK, ""]
     for day in content.days:
@@ -23,6 +25,17 @@ def brief_text(content: BriefContent) -> str:
         lines.append("")
     lines += [content.built, FOOTER_REMINDER]
     return "\n".join(lines) + "\n"
+
+
+def _heads_ups_text(heads_ups: list[HeadsUp]) -> list[str]:
+    """The Heads-up box, or nothing when no rule matches."""
+    if not heads_ups:
+        return []
+    lines = ["HEADS-UP"]
+    for heads_up in heads_ups:
+        lines.append(f"  {heads_up.title}")
+        lines += [f"    {item}" for item in heads_up.items]
+    return lines + [""]
 
 
 def _row_text(row: Row) -> list[str]:

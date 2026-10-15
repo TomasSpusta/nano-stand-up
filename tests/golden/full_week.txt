@@ -4,6 +4,19 @@ TEST-SEM - Monday 19. 10. to Sunday 25. 10. 2026
 
 2 waiting for your approval, 5 reservations, 69.2 h booked, 3 users, 1 without an experiment plan, 1 cancelled
 
+HEADS-UP
+  Waiting for your approval
+    Tue 20. 10. 15:00 to Wed 13:00, Karel Neexistujici
+    Sat 24. 10. 10:00 to Mon 2. 11. 10:00, Petr Vymysleny
+  No experiment plan
+    Mon 19. 10. 14:00 to 14:45, Jana Smyslena
+  Outside working hours (07:00 to 19:00, Monday to Friday)
+    Mon 19. 10. from Sun 22:00 to 06:00, Jana Smyslena
+    Tue 20. 10. 15:00 to Wed 13:00, Karel Neexistujici
+    Sat 24. 10. 10:00 to Mon 2. 11. 10:00, Petr Vymysleny
+  Cancelled
+    Wed 21. 10. 09:00 to 10:00, Eva <Testova>
+
 MONDAY 19. 10.
   from Sun 22:00 to 06:00 (8 h)
     Jana Smyslena, 2026-000001/RG-1-01

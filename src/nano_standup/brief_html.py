@@ -15,6 +15,7 @@ from nano_standup.brief_content import (
     BriefContent,
     Count,
     Day,
+    HeadsUp,
     LabelledNote,
     Row,
     time_span,
@@ -49,7 +50,7 @@ STATUS_STYLES = {
 
 def brief_html(content: BriefContent) -> str:
     if content.has_reservations:
-        body = _counts_html(content.counts) + "".join(_day_html(day) for day in content.days)
+        body = _counts_html(content.counts) + _heads_ups_html(content.heads_ups) + "".join(_day_html(day) for day in content.days)
     else:
         body = f'<p style="margin:16px 0 8px;">{NO_RESERVATIONS_THIS_WEEK}</p>'
 
@@ -89,6 +90,21 @@ def _count_html(count: Count) -> str:
         f'<span style="display:inline-block;background:{background};{border}border-radius:6px;padding:8px 12px;margin:0 8px 8px 0;">'
         f'<strong style="font-size:18px;color:{value_color};">{count.value}</strong> '
         f'<span style="color:{GREY_TEXT};font-size:13px;">{count.label}</span></span>'
+    )
+
+
+def _heads_ups_html(heads_ups: list[HeadsUp]) -> str:
+    """The Heads-up box, or nothing when no rule matches."""
+    if not heads_ups:
+        return ""
+    sections = "".join(
+        f'<div style="margin-top:8px;"><strong>{html.escape(heads_up.title)}</strong>'
+        f'<ul style="margin:2px 0 0;padding-left:20px;">{"".join(f"<li>{_html_text(item)}</li>" for item in heads_up.items)}</ul></div>'
+        for heads_up in heads_ups
+    )
+    return (
+        f'<div style="background:{AMBER_BACKGROUND};border-left:3px solid {AMBER_TEXT};border-radius:6px;padding:10px 12px;margin:0 0 12px;font-size:14px;">'
+        f'<div style="font-weight:700;color:{AMBER_TEXT};">Heads-up</div>{sections}</div>'
     )
 
 

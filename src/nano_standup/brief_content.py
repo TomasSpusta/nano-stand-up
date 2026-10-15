@@ -3,14 +3,13 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from nano_standup.domain import PRAGUE, Instrument, Reservation, ReservationStatus, Week, day_name
+from nano_standup.domain import PRAGUE, WEEKEND, Instrument, Reservation, ReservationStatus, Week, day_name
+from nano_standup.heads_ups import heads_ups
 
 NO_EXPERIMENT_PLAN = "No experiment plan given"
 NO_RESERVATIONS_THIS_WEEK = "No reservations this week."
 NO_RESERVATIONS_THIS_DAY = "No reservations"
 FOOTER_REMINDER = "Check the booking system for later changes."
-# Saturday and Sunday, as date.weekday() gives them.
-WEEKEND = {5, 6}
 MARKS = {
     ReservationStatus.CANCELLED: "Cancelled",
     ReservationStatus.REQUESTED: "Requested: needs your approval",
@@ -68,6 +67,14 @@ def time_span(start: str, end: str, runs_in: bool) -> str:
 
 
 @dataclass(frozen=True)
+class HeadsUp:
+    """One heads-up rule that matched, with one line per matching reservation: "Tue 20. 10. 13:00 to 14:30, Jana Smyslena"."""
+
+    title: str
+    items: list[str]
+
+
+@dataclass(frozen=True)
 class Day:
     calendar_day: date
     rows: list[Row]
@@ -85,6 +92,8 @@ class BriefContent:
     week_line: str
     # Empty for a week without reservations: it gets a short brief with no counts and no days.
     counts: list[Count]
+    # Empty when no rule matches: the brief then leaves out the Heads-up box.
+    heads_ups: list[HeadsUp]
     days: list[Day]
     built: str
 
@@ -107,6 +116,9 @@ def brief_content(
         instrument_name=instrument.name,
         week_line=f"{instrument.alias} - Monday {_day_month(week.monday)} to Sunday {_day_month(week.sunday)} {week.sunday.year}",
         counts=_counts(week, reservations) if reservations else [],
+        heads_ups=[
+            HeadsUp(match.title, [_heads_up_item(r, week) for r in match.reservations]) for match in heads_ups(reservations)
+        ],
         days=_days(week, reservations) if reservations else [],
         built=f"Built on {day_name(built_local.date())} {_day_month(built_local.date())} {built_local.year} at {built_local:%H:%M}.",
     )
@@ -135,14 +147,23 @@ def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
     ]
 
 
-def _days(week: Week, reservations: list[Reservation]) -> list[Day]:
-    """Every weekday, empty or not. Weekend days only when they have reservations.
+def _heads_up_item(reservation: Reservation, week: Week) -> str:
+    """The day the reservation shows on, its time, and its user, as in its row."""
+    day = _shown_on(reservation, week)
+    row = _row(reservation, day)
+    return f"{_short_day_name(day)} {_day_month(day)} {time_span(row.start, row.end, row.runs_in)}, {row.user_name}"
 
-    A reservation shows on its start day, or on Monday when it runs in from the previous week.
-    """
+
+def _shown_on(reservation: Reservation, week: Week) -> date:
+    """Its start day, or Monday when it runs in from the previous week."""
+    return max(reservation.start.date(), week.monday)
+
+
+def _days(week: Week, reservations: list[Reservation]) -> list[Day]:
+    """Every weekday, empty or not. Weekend days only when they have reservations."""
     days = []
     for day in week.days():
-        rows = [_row(r, day) for r in reservations if max(r.start.date(), week.monday) == day]
+        rows = [_row(r, day) for r in reservations if _shown_on(r, week) == day]
         if rows or day.weekday() not in WEEKEND:
             days.append(Day(day, rows))
     return days
