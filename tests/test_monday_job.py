@@ -68,17 +68,31 @@ class FailingBookingSource:
 
 
 class FailingMailSender(InMemoryMailSender):
-    """Keeps the messages in memory, but the mail server is down until a given time."""
+    """Keeps the messages in memory, but the mail server is down until a given time.
 
-    def __init__(self, time: FakeTime, until: datetime) -> None:
+    `only_to` set means only mail to that address fails.
+    """
+
+    def __init__(self, time: FakeTime, until: datetime, only_to: str | None = None) -> None:
         super().__init__()
         self._time = time
         self._until = until
+        self._only_to = only_to
+        # The times a message failed, for checking the retries.
+        self.failed_at: list[datetime] = []
 
     def send(self, message: Message) -> None:
-        if self._time.now < self._until:
+        if self._time.now < self._until and self._only_to in (None, message.to):
+            self.failed_at.append(self._time.now)
             raise ConnectionRefusedError(111, "Connection refused")
         super().send(message)
+
+
+class FailingSubscriptionStore(SubscriptionStore):
+    """The real subscriptions, but ending one fails with a database error."""
+
+    def end_because_guarantor_changed(self, subscription: Subscription, now: datetime) -> bool:
+        raise sqlite3.OperationalError("database is locked")
 
 
 class FailingSentBriefStore(SentBriefStore):
@@ -100,12 +114,13 @@ def _run(
     mail_sender: MailSender,
     time: FakeTime | None = None,
     sent_briefs: SentBriefStore | None = None,
+    subscriptions: SubscriptionStore | None = None,
 ) -> MondayJobResult:
     """Runs the Monday job with the default working hours. The time is Monday 08:00 unless given."""
     time = time or FakeTime(MONDAY_8AM)
     return run_monday_job(
         source,
-        SubscriptionStore(database),
+        subscriptions or SubscriptionStore(database),
         sent_briefs or SentBriefStore(database),
         mail_sender,
         clock=time.clock,
@@ -606,13 +621,28 @@ def test_a_re_run_in_the_same_week_sends_no_second_stop_notice(tmp_path: Path) -
     assert (result.subscriptions_ended, result.already_sent) == (0, 1)
 
 
-def test_a_stop_notice_that_cannot_be_sent_still_ends_the_subscription_and_is_in_the_error_report(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_the_next_week_sends_nothing_to_a_subscription_that_ended(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    source = FakeBookingSource(
+        instruments=[_with_guarantor(INSTRUMENT, "Ota Zkusebni", "ota.zkusebni@example.org"), OTHER]
+    )
+    _run(source, database, InMemoryMailSender())
+    next_week = InMemoryMailSender()
+
+    result = _run(source, database, next_week, FakeTime(MONDAY_8AM + timedelta(days=7)))
+
+    assert [(m.to, m.subject) for m in next_week.sent] == [
+        ("ota.zkusebni@example.org", "Brief: TEST-LAB - week 26. 10.-1. 11. 2026")
+    ]
+    assert (result.sent, result.subscriptions_ended) == (1, 0)
+
+
+def test_a_stop_notice_that_fails_is_tried_again_with_the_briefs(tmp_path: Path) -> None:
     database = tmp_path / "standup.sqlite3"
     _subscribe_both(database)
     time = FakeTime(MONDAY_8AM)
-    # The mail server is back at 08:20, after the stop notice failed but before the brief's second try.
+    # The mail server is back at 08:20, so the third try at 08:30 works.
     mail_sender = FailingMailSender(time, until=MONDAY_8AM + timedelta(minutes=20))
     source = FakeBookingSource(
         instruments=[_with_guarantor(INSTRUMENT, "Ota Zkusebni", "ota.zkusebni@example.org"), OTHER]
@@ -620,7 +650,30 @@ def test_a_stop_notice_that_cannot_be_sent_still_ends_the_subscription_and_is_in
 
     result = _run(source, database, mail_sender, time)
 
-    # The stop notice is not tried again, so it is not sent at all, and no brief goes to the former subscriber.
+    assert sorted((m.to, m.subject) for m in mail_sender.sent) == [
+        ("hana.testova@example.org", "Your brief for TEST-SEM has stopped"),
+        ("ota.zkusebni@example.org", "Brief: TEST-LAB - week 19.-25. 10. 2026"),
+    ]
+    assert time.now == MONDAY_8AM + timedelta(minutes=30)
+    assert (result.sent, result.subscriptions_ended, result.failed, result.stop_notices_not_sent) == (1, 1, (), ())
+
+
+def test_a_stop_notice_that_cannot_be_sent_still_ends_the_subscription_and_is_in_the_error_report(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    time = FakeTime(MONDAY_8AM)
+    # Mail to the former subscriber fails all morning.
+    mail_sender = FailingMailSender(time, until=MONDAY_8AM + timedelta(days=1), only_to="hana.testova@example.org")
+    source = FakeBookingSource(
+        instruments=[_with_guarantor(INSTRUMENT, "Ota Zkusebni", "ota.zkusebni@example.org"), OTHER]
+    )
+
+    result = _run(source, database, mail_sender, time)
+
+    # Tried every 15 minutes up to 10:00, then given up; no brief goes to the former subscriber.
+    assert mail_sender.failed_at == [MONDAY_8AM + timedelta(minutes=15 * i) for i in range(9)]
     brief, error_report = mail_sender.sent
     assert brief.to == "ota.zkusebni@example.org"
     assert error_report.to == "admin@example.org"
@@ -693,9 +746,10 @@ def test_an_unexpected_error_sending_a_stop_notice_does_not_stop_the_run(tmp_pat
     source = FakeBookingSource(
         instruments=[_with_guarantor(INSTRUMENT, "Ota Zkusebni", "ota.zkusebni@example.org"), OTHER]
     )
+    time = FakeTime(MONDAY_8AM)
     mail_sender = BrokenMailSender(broken_to="hana.testova@example.org")
 
-    result = _run(source, database, mail_sender)
+    result = _run(source, database, mail_sender, time)
 
     brief, error_report = mail_sender.sent
     assert brief.to == "ota.zkusebni@example.org"
@@ -706,3 +760,38 @@ def test_an_unexpected_error_sending_a_stop_notice_does_not_stop_the_run(tmp_pat
     )
     assert SubscriptionStore(database).list_active() == [Subscription(OTHER.id, "ota.zkusebni@example.org")]
     assert (result.sent, result.subscriptions_ended, result.failed) == (1, 1, ())
+    # A retry cannot fix an unexpected error, so the stop notice is not tried again.
+    assert time.now == MONDAY_8AM
+
+
+def test_a_subscription_that_cannot_be_ended_gets_no_brief_and_is_in_the_error_report(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    time = FakeTime(MONDAY_8AM)
+    source = FakeBookingSource(
+        instruments=[_with_guarantor(INSTRUMENT, "Ota Zkusebni", "ota.zkusebni@example.org"), OTHER]
+    )
+    mail_sender = InMemoryMailSender()
+
+    result = _run(source, database, mail_sender, time, subscriptions=FailingSubscriptionStore(database))
+
+    brief, error_report = mail_sender.sent
+    assert brief.to == "ota.zkusebni@example.org"
+    assert error_report.subject == "Nano Stand-up: 1 brief not sent for the week of 19. 10. 2026"
+    assert (
+        "TEST-SEM (instr-1) to hana.testova@example.org: Could not end the subscription: database is locked"
+        in error_report.text
+    )
+    assert "unexpected" not in error_report.text
+    # A locked database may be free later, so it is tried again up to 10:00.
+    assert time.now == MONDAY_8AM + timedelta(hours=2)
+    assert (result.sent, result.subscriptions_ended, len(result.failed)) == (1, 0, 1)
+    assert any(
+        r.levelno == logging.ERROR
+        and r.getMessage().startswith(
+            "Could not end the subscription for TEST-SEM (instr-1) to hana.testova@example.org, so no brief was sent"
+        )
+        for r in caplog.records
+    )

@@ -77,13 +77,15 @@ The server timer starts the Monday job once, at 08:00 Prague time.
 Before each brief, the job checks that the subscriber's email is still the instrument's guarantor email in the booking system, ignoring case and surrounding spaces.
 If not (the guarantor changed, or the guarantor's email changed), no brief goes out and the subscription ends.
 The old address gets a short stop notice instead, once: an ended subscription is not checked again.
-If the stop notice cannot be sent, the subscription still ends, the stop notice is not tried again, and it is listed in the error report.
+If the stop notice cannot be sent, the subscription still ends, and the stop notice is tried again like a brief (see below).
+A stop notice still not sent at 10:00 is listed in the error report; a re-run does not send it.
+If the database cannot end the subscription, no brief goes out, and it is tried again like a brief.
 The log names each ended subscription by instrument and old address.
 If the booking system has no guarantor email for an instrument, its brief fails each week and shows in the service admin error report, and the subscription is not ended.
 The database keeps ended subscriptions.
 A database file from an older version is upgraded the first time this version opens it, and it keeps its subscriptions.
 
-When the booking API or the mail server fails for a brief, the job tries that brief again every 15 minutes, up to 10:00 Prague time.
+When the booking API or the mail server fails for a brief or a stop notice, the job tries it again every 15 minutes, up to 10:00 Prague time.
 One failing instrument does not stop the briefs for the others.
 Other errors fail at once, with no retries: an instrument the booking system no longer has, booking data a brief cannot use, or an unexpected error.
 Briefs that still fail at 10:00 go to the service admin in one error report, which lists the failed instruments (by alias and id when known) and their errors.

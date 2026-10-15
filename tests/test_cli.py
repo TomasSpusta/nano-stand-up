@@ -71,12 +71,21 @@ def test_a_stop_notice_not_sent_exits_with_code_3_and_still_ends_the_subscriptio
     database.parent.mkdir()
     # The booking system has another guarantor email for the instrument now.
     SubscriptionStore(database).add_active("equip-sem", "former.guarantor@example.org", now)
+    waits: list[timedelta] = []
+
+    def sleep(duration: timedelta) -> None:
+        nonlocal now
+        waits.append(duration)
+        now += duration
+
     with local_booking_server({"equip-sem": SEM}) as server:
         config = write_config(tmp_path, server.url)
         # The mail server at port 1 refuses, so the stop notice cannot be sent.
-        code = main(["--config", str(config), "run-monday-job"], clock=lambda: now)
+        code = main(["--config", str(config), "run-monday-job"], clock=lambda: now, sleep=sleep)
 
     assert code == 3
+    # The stop notice is tried again from 08:15 to 10:00, like a brief.
+    assert waits == [timedelta(minutes=15)] * 8
     assert SubscriptionStore(database).list_active() == []
 
 
