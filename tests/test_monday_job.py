@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from nano_standup.booking_api import BookingApiError, BookingDataError
+from nano_standup.booking_api import BookingAccessDenied, BookingApiError, BookingDataError
 from nano_standup.booking_source import BookingSource, FakeBookingSource
 from nano_standup.domain import Guarantor, Instrument, Reservation, ReservationStatus, Week
 from nano_standup.mail import InMemoryMailSender, MailSender, Message, RecipientRefused
@@ -559,8 +559,12 @@ class BrokenBookingSource:
 
 @pytest.mark.parametrize(
     "error",
-    [RuntimeError("Unexpected bug"), BookingDataError("A reservation has no 'id' in the booking API answer")],
-    ids=["unexpected", "bad data"],
+    [
+        RuntimeError("Unexpected bug"),
+        BookingDataError("A reservation has no 'id' in the booking API answer"),
+        BookingAccessDenied("No access to instrument 'instr-1' in the booking system"),
+    ],
+    ids=["unexpected", "bad data", "no access"],
 )
 def test_an_error_a_retry_cannot_fix_goes_straight_to_the_error_report(tmp_path: Path, error: Exception) -> None:
     database = tmp_path / "standup.sqlite3"

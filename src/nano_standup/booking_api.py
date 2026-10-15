@@ -54,6 +54,10 @@ class BookingDataError(RuntimeError):
     """The booking API returned data the service cannot use."""
 
 
+class BookingAccessDenied(RuntimeError):
+    """The booking API refused the API key access to an instrument (HTTP 403). A later try gets the same answer."""
+
+
 class BookingApi(Protocol):
     def get(self, path: str, params: Params) -> Any: ...  # Any: parsed JSON.
 
@@ -110,6 +114,10 @@ class ApiBookingSource:
         except BookingApiError as error:
             if error.status == 404:
                 raise InstrumentNotFound(f"No instrument with id {instrument_id!r} in the booking system") from error
+            if error.status == 403:
+                raise BookingAccessDenied(
+                    f"No access to instrument {instrument_id!r} in the booking system: {error}"
+                ) from error
             raise
         alias = item.get("ge_alias") or ""
         guarantor_json = item.get("ge_ownerid") or {}

@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 from html import escape
 
-from nano_standup.booking_api import BookingApiError, BookingDataError
+from nano_standup.booking_api import BookingAccessDenied, BookingApiError, BookingDataError
 from nano_standup.booking_source import BookingSource, InstrumentNotFound
 from nano_standup.brief import build_brief
 from nano_standup.domain import PRAGUE, Clock, Instrument, Week, WorkingHours
@@ -35,9 +35,9 @@ RETRY_DEADLINE = time(10, 0)
 # OSError covers all SMTP errors.
 RETRYABLE_ERRORS = (BookingApiError, OSError)
 # The failures a later try cannot fix, so the brief fails at once: the instrument is gone from the booking system,
-# it lacks the data a brief needs, or the mail server refuses the recipient address. Any other, unexpected error
-# fails at once too.
-PERMANENT_ERRORS = (InstrumentNotFound, BookingDataError, RecipientRefused)
+# the API key has no access to it, it lacks the data a brief needs, or the mail server refuses the recipient address.
+# Any other, unexpected error fails at once too.
+PERMANENT_ERRORS = (InstrumentNotFound, BookingAccessDenied, BookingDataError, RecipientRefused)
 
 
 @dataclass(frozen=True)
