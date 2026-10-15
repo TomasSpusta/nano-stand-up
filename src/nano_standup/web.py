@@ -38,6 +38,11 @@ CONFIRM_STATUS = {
 }
 
 
+def unsubscribe_url(public_base_url: str, token: str) -> str:
+    """The unsubscribe link in a brief. The web app answers it."""
+    return f"{public_base_url.rstrip('/')}/unsubscribe?{urllib.parse.urlencode({'token': token})}"
+
+
 def create_app(
     source: BookingSource,
     store: SubscriptionStore,

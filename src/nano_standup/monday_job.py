@@ -1,6 +1,7 @@
 """Monday job: builds and sends this week's brief for every active subscription."""
 
 import logging
+from collections.abc import Callable
 
 from nano_standup.booking_source import BookingSource
 from nano_standup.brief import build_brief
@@ -18,15 +19,20 @@ def run_monday_job(
     clock: Clock,
     from_address: str,
     working_hours: WorkingHours,
+    unsubscribe_url: Callable[[str], str],
 ) -> int:
-    """Send the briefs and return how many went out. The week is the one that holds today in Prague."""
+    """Send the briefs and return how many went out. The week is the one that holds today in Prague.
+
+    `unsubscribe_url` turns a token into the unsubscribe link of a brief.
+    """
     now = clock()
     week = Week.containing(now.astimezone(PRAGUE).date())
     sent = 0
     for subscription in subscriptions.list_active():
         instrument = source.get_instrument(subscription.instrument_id)
         reservations = source.get_reservations(instrument.id, week)
-        brief = build_brief(instrument, week, reservations, built_at=now, working_hours=working_hours)
+        unsubscribe_link = unsubscribe_url(subscriptions.unsubscribe_token(subscription, now))
+        brief = build_brief(instrument, week, reservations, now, working_hours, unsubscribe_link)
         mail_sender.send(
             Message(
                 from_address=from_address,

@@ -25,7 +25,11 @@ def build_brief(
     reservations: list[Reservation],
     built_at: datetime,
     working_hours: WorkingHours,
+    unsubscribe_link: str,
 ) -> Brief:
-    """Build one brief. `built_at` must carry a time zone; the footer shows it in Prague time."""
-    content = brief_content(instrument, week, reservations, built_at, working_hours)
+    """Build one brief. `built_at` must carry a time zone; the footer shows it in Prague time.
+
+    The footer ends with `unsubscribe_link`, which ends the subscription this brief goes to.
+    """
+    content = brief_content(instrument, week, reservations, built_at, working_hours, unsubscribe_link)
     return Brief(subject=content.subject, html=brief_html(content), text=brief_text(content))

@@ -1,6 +1,7 @@
 """Command line: wires the real modules together from the settings."""
 
 import argparse
+import functools
 import logging
 import os
 import sys
@@ -16,7 +17,7 @@ from nano_standup.mail import SmtpMailSender
 from nano_standup.monday_job import run_monday_job
 from nano_standup.service_admin import NotTheGuarantor, add_subscription
 from nano_standup.subscriptions import SubscriptionStore
-from nano_standup.web import create_app
+from nano_standup.web import create_app, unsubscribe_url
 
 log = logging.getLogger("nano_standup")
 
@@ -61,6 +62,7 @@ def _add_subscription(settings: Settings, instrument_id: str, email: str) -> int
 
 
 def _run_monday_job(settings: Settings) -> int:
+    public_base_url = _public_base_url(settings, "the Monday job needs for the unsubscribe links in the briefs")
     sent = run_monday_job(
         _booking_source(settings),
         _store(settings),
@@ -68,25 +70,32 @@ def _run_monday_job(settings: Settings) -> int:
         clock=system_clock,
         from_address=settings.mail_from,
         working_hours=settings.working_hours,
+        unsubscribe_url=functools.partial(unsubscribe_url, public_base_url),
     )
     log.info("Monday job done: %d briefs sent", sent)
     return 0
 
 
 def _serve(settings: Settings) -> int:
-    if settings.public_base_url is None:
-        raise ConfigError("Missing setting PUBLIC_BASE_URL, which the web app needs for its confirm links")
+    public_base_url = _public_base_url(settings, "the web app needs for its confirm links")
     app = create_app(
         source=_booking_source(settings),
         store=_store(settings),
         mail_sender=SmtpMailSender(settings.smtp),
         clock=system_clock,
         from_address=settings.mail_from,
-        public_base_url=settings.public_base_url,
+        public_base_url=public_base_url,
     )
-    # No access log: it writes each full URL, and a confirm link's URL holds its token. The app logs what matters.
+    # No access log: it writes each full URL, and a confirm or unsubscribe link's URL holds its token.
+    # The app logs what matters.
     uvicorn.run(app, host=settings.web_host, port=settings.web_port, access_log=False)
     return 0
+
+
+def _public_base_url(settings: Settings, needed_for: str) -> str:
+    if settings.public_base_url is None:
+        raise ConfigError(f"Missing setting PUBLIC_BASE_URL, which {needed_for}")
+    return settings.public_base_url
 
 
 def _booking_source(settings: Settings) -> ApiBookingSource:

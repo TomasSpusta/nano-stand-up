@@ -5,6 +5,7 @@ from nano_standup.brief_content import (
     NO_EXPERIMENT_PLAN,
     NO_RESERVATIONS_THIS_DAY,
     NO_RESERVATIONS_THIS_WEEK,
+    UNSUBSCRIBE,
     BriefContent,
     HeadsUp,
     HeadsUpItem,
@@ -23,7 +24,7 @@ def brief_text(content: BriefContent) -> str:
         lines.append(day.heading.upper())
         lines += [line for row in day.rows for line in _row_text(row)] or [f"  {NO_RESERVATIONS_THIS_DAY}"]
         lines.append("")
-    lines += [content.built, FOOTER_REMINDER]
+    lines += [content.built, FOOTER_REMINDER, "", f"{UNSUBSCRIBE}: {content.unsubscribe_link}"]
     return "\n".join(lines) + "\n"
 
 

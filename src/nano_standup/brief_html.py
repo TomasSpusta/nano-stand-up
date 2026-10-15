@@ -12,6 +12,7 @@ from nano_standup.brief_content import (
     NO_EXPERIMENT_PLAN,
     NO_RESERVATIONS_THIS_DAY,
     NO_RESERVATIONS_THIS_WEEK,
+    UNSUBSCRIBE,
     BriefContent,
     Count,
     Day,
@@ -64,6 +65,7 @@ def brief_html(content: BriefContent) -> str:
     else:
         body = f'<p style="margin:16px 0 8px;">{NO_RESERVATIONS_THIS_WEEK}</p>'
     body = _heads_ups_html(content.heads_ups) + body
+    unsubscribe = f'<a href="{html.escape(content.unsubscribe_link)}" style="color:{GREY_TEXT};">{UNSUBSCRIBE}</a>'
 
     # Outlook ignores max-width, so it gets a fixed-width table instead.
     return f"""<!doctype html>
@@ -80,6 +82,7 @@ def brief_html(content: BriefContent) -> str:
     <div style="color:{GREY_TEXT};font-size:12px;padding:12px 4px;">
       {content.built}
       {FOOTER_REMINDER}
+      <div style="margin-top:8px;">{unsubscribe}</div>
     </div>
   </div>
   {OUTLOOK_WRAPPER_END}

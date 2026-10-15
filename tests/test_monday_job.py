@@ -1,11 +1,12 @@
-from datetime import UTC, datetime
+import re
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from nano_standup.booking_source import FakeBookingSource
 from nano_standup.domain import Guarantor, Instrument, ReservationStatus
 from nano_standup.mail import InMemoryMailSender
 from nano_standup.monday_job import run_monday_job
-from nano_standup.subscriptions import SubscriptionStore
+from nano_standup.subscriptions import Subscription, SubscriptionStore, UnsubscribeOutcome
 
 from helpers import INSTRUMENT, WORKING_HOURS, heads_up_text, reservation, visible_text
 
@@ -17,18 +18,28 @@ OTHER = Instrument(
     alias="TEST-LAB",
     guarantor=Guarantor(name="Ota Zkusebni", email="ota.zkusebni@example.org"),
 )
+UNSUBSCRIBE_LINK = re.compile(r"https://standup\.example\.org/unsubscribe\?token=([A-Za-z0-9_-]+)")
 
 
-def _run(source: FakeBookingSource, store: SubscriptionStore, mail_sender: InMemoryMailSender) -> None:
-    """Runs the Monday job on Monday 08:00, with the default working hours."""
+def _run(
+    source: FakeBookingSource, store: SubscriptionStore, mail_sender: InMemoryMailSender, now: datetime = MONDAY_8AM
+) -> None:
+    """Runs the Monday job, by default on Monday 08:00, with the default working hours."""
     run_monday_job(
         source,
         store,
         mail_sender,
-        clock=lambda: MONDAY_8AM,
+        clock=lambda: now,
         from_address="standup@example.org",
         working_hours=WORKING_HOURS,
+        unsubscribe_url=lambda token: f"https://standup.example.org/unsubscribe?token={token}",
     )
+
+
+def _unsubscribe_token(text: str) -> str:
+    """The token of the one unsubscribe link in a brief's plain-text version."""
+    [token] = UNSUBSCRIBE_LINK.findall(text)
+    return str(token)
 
 
 def test_sends_one_brief_per_active_subscription_to_the_subscriber(tmp_path: Path) -> None:
@@ -126,3 +137,39 @@ def test_a_brief_points_out_heads_ups_in_both_versions(tmp_path: Path) -> None:
         "No experiment plan Wed 21. 10. 18:00 to 21:00, Jana Smyslena "
         "Outside working hours (07:00 to 19:00, Monday to Friday) Wed 21. 10. 18:00 to 21:00, Jana Smyslena"
     )
+
+
+def test_each_brief_has_its_own_unsubscribe_link_for_its_subscription(tmp_path: Path) -> None:
+    source = FakeBookingSource(instruments=[INSTRUMENT, OTHER])
+    store = SubscriptionStore(tmp_path / "standup.sqlite3")
+    store.add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    store.add_active(OTHER.id, "hana.testova@example.org", MONDAY_8AM)
+    mail_sender = InMemoryMailSender()
+
+    _run(source, store, mail_sender)
+
+    sem, lab = mail_sender.sent
+    sem_token = _unsubscribe_token(sem.text)
+    assert sem_token != _unsubscribe_token(lab.text)
+    assert f"https://standup.example.org/unsubscribe?token={sem_token}" in sem.html
+    assert store.unsubscribe(sem_token, MONDAY_8AM).subscription == Subscription(
+        INSTRUMENT.id, "hana.testova@example.org"
+    )
+
+
+def test_the_next_monday_job_sends_nothing_for_an_unsubscribed_subscription(tmp_path: Path) -> None:
+    source = FakeBookingSource(instruments=[INSTRUMENT, OTHER])
+    store = SubscriptionStore(tmp_path / "standup.sqlite3")
+    store.add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    store.add_active(OTHER.id, "hana.testova@example.org", MONDAY_8AM)
+    first_week = InMemoryMailSender()
+    _run(source, store, first_week)
+    sem = next(m for m in first_week.sent if "TEST-SEM" in m.subject)
+    assert store.unsubscribe(_unsubscribe_token(sem.text), MONDAY_8AM).outcome is UnsubscribeOutcome.UNSUBSCRIBED
+
+    next_week = InMemoryMailSender()
+    _run(source, store, next_week, now=MONDAY_8AM + timedelta(weeks=1))
+
+    assert [(m.to, m.subject) for m in next_week.sent] == [
+        ("hana.testova@example.org", "Brief: TEST-LAB - week 26. 10.-1. 11. 2026"),
+    ]

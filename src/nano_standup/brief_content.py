@@ -20,6 +20,7 @@ NO_EXPERIMENT_PLAN = "No experiment plan given"
 NO_RESERVATIONS_THIS_WEEK = "No reservations this week."
 NO_RESERVATIONS_THIS_DAY = "No reservations"
 FOOTER_REMINDER = "Check the booking system for later changes."
+UNSUBSCRIBE = "Unsubscribe from this brief"
 MARKS = {
     ReservationStatus.CANCELLED: "Cancelled",
     ReservationStatus.REQUESTED: "Requested: needs your approval",
@@ -127,6 +128,8 @@ class BriefContent:
     heads_ups: list[HeadsUp]
     days: list[Day]
     built: str
+    # Ends the subscription this brief goes to.
+    unsubscribe_link: str
 
     @property
     def has_reservations(self) -> bool:
@@ -139,6 +142,7 @@ def brief_content(
     reservations: list[Reservation],
     built_at: datetime,
     working_hours: WorkingHours,
+    unsubscribe_link: str,
 ) -> BriefContent:
     """`built_at` must carry a time zone; the footer shows it in Prague time."""
     if built_at.tzinfo is None:
@@ -154,6 +158,7 @@ def brief_content(
         heads_ups=_heads_ups(week, reservations, working_hours),
         days=_days(week, reservations) if reservations else [],
         built=f"Built on {_full_date(built_local.date())} at {built_local:%H:%M}.",
+        unsubscribe_link=unsubscribe_link,
     )
 
 

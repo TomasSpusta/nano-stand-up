@@ -64,6 +64,10 @@ def local_booking_server(
                 # The whole list on page 1, without filters. Enough for tests of the wiring.
                 self._reply(200, list(state.instruments.values()) if query.get("page") == ["1"] else [])
                 return
+            if url.path == "/api/service-appointment":
+                # No reservations: an empty week. Enough for tests of the wiring.
+                self._reply(200, [])
+                return
             item = state.instruments.get(url.path.removeprefix("/api/equipment/"))
             if item is None:
                 self._reply(404, {"error": "Not Found"})

@@ -8,6 +8,7 @@ from nano_standup.domain import Guarantor, Instrument, Reservation, ReservationS
 GUARANTOR = Guarantor(name="Hana Testova", email="hana.testova@example.org")
 INSTRUMENT = Instrument(id="instr-1", name="Test Electron Microscope", alias="TEST-SEM", guarantor=GUARANTOR)
 WORKING_HOURS = WorkingHours(time(7, 0), time(19, 0))
+UNSUBSCRIBE_LINK = "https://standup.example.org/unsubscribe?token=test-token"
 
 
 def reservation(
