@@ -160,6 +160,31 @@ def test_the_page_lists_the_instruments_by_alias_and_name_escaped(site: Site) ->
     assert "<Chemical>" not in response.text
 
 
+def test_the_page_lists_an_instrument_once_when_its_alias_is_its_name(tmp_path: Path) -> None:
+    rfid = replace(OTHER, name="TEST-RFID", alias="TEST-RFID")
+    site = Site(tmp_path, source=FakeBookingSource([rfid]))
+
+    response = site.client.get("/")
+
+    assert f'<option value="{rfid.id}">TEST-RFID</option>' in response.text
+
+
+def test_no_page_is_kept_in_a_browser_cache(site: Site) -> None:
+    # A cached page would show an old answer for a link, and the pages carry the secret tokens.
+    sem = site.store.add_active(INSTRUMENT.id, GUARANTOR.email, NOW)
+    responses = [
+        site.client.get("/"),
+        site.client.post("/", data={"instrument_id": INSTRUMENT.id, "email": GUARANTOR.email}),
+        site.client.get(site.confirm_link()),
+        site.client.get("/confirm?token=unknown"),
+        site.client.get(site.unsubscribe_link(sem)),
+        site.press_button(site.unsubscribe_link(sem)),
+    ]
+
+    for response in responses:
+        assert response.headers["Cache-Control"] == "no-store"
+
+
 def test_the_page_reads_the_instrument_list_once_while_it_is_fresh(tmp_path: Path) -> None:
     source = CountingSource()
     site = Site(tmp_path, source)
@@ -320,6 +345,22 @@ def test_pressing_confirm_makes_the_subscription_active(site: Site) -> None:
     assert response.status_code == 200
     assert "Your subscription is active" in visible_text(response.text)
     assert site.store.list_active() == [Subscription(INSTRUMENT.id, GUARANTOR.email)]
+
+
+def test_the_check_your_email_page_says_to_press_confirm(site: Site) -> None:
+    text = visible_text(site.subscribe(INSTRUMENT.id, GUARANTOR.email))
+
+    assert "Your subscription starts when you open that link and press Confirm." in text
+
+
+def test_pages_that_say_subscribe_again_link_to_the_sign_up_page(site: Site) -> None:
+    sem = site.store.add_active(INSTRUMENT.id, GUARANTOR.email, NOW)
+
+    responses = [site.press_button(site.unsubscribe_link(sem)), site.client.get("/confirm?token=unknown")]
+
+    for response in responses:
+        assert "subscribe again" in visible_text(response.text)
+        assert '<a href="./">' in response.text
 
 
 def test_a_used_confirm_link_shows_a_clear_message(site: Site) -> None:

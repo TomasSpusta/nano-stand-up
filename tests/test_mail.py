@@ -63,6 +63,17 @@ def test_a_message_with_an_unsubscribe_link_gets_the_one_click_unsubscribe_heade
     assert email["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
 
 
+def test_a_long_unsubscribe_link_goes_out_as_plain_text_in_the_header(smtp: FakeSmtpServer) -> None:
+    # As long as a real link: a header over 78 characters must not turn into an encoded word, which mail apps
+    # do not read as a link.
+    link = "https://standup.example.org/unsubscribe?token=vPbWYutGmL0qyUiHCd2Pbi09Oaf0L7-cjZzurtnpbfg"
+
+    SmtpMailSender(SmtpSettings(host="localhost", port=1025)).send(dataclasses.replace(MESSAGE, unsubscribe_link=link))
+
+    [email] = smtp.connections[0].sent
+    assert f"List-Unsubscribe: <{link}>\n".encode() in email.as_bytes()
+
+
 def test_a_message_without_an_unsubscribe_link_gets_no_unsubscribe_headers(smtp: FakeSmtpServer) -> None:
     SmtpMailSender(SmtpSettings(host="localhost", port=1025)).send(MESSAGE)
 

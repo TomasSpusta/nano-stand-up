@@ -6,9 +6,10 @@ The routes stay thin: the work is in `SubscriptionRequests`, and the HTML in `we
 
 import logging
 import urllib.parse
+from collections.abc import Awaitable, Callable
 from typing import Annotated, assert_never
 
-from fastapi import BackgroundTasks, FastAPI, Form, Query
+from fastapi import BackgroundTasks, FastAPI, Form, Query, Request, Response
 from fastapi.responses import HTMLResponse
 
 from nano_standup.booking_api import BookingApiError, BookingDataError
@@ -55,6 +56,14 @@ def unsubscribe_link_for(public_base_url: str, token: str) -> str:
 
 def create_app(requests: SubscriptionRequests) -> FastAPI:
     app = FastAPI(title="Nano Stand-up", docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.middleware("http")
+    async def no_store(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        """No browser keeps a page: a kept page would show an old answer for a link, and the pages carry the
+        secret tokens."""
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     def request_in_background(instrument_id: str, email: str) -> None:
         """Runs after the page is sent, so the page and its timing are the same whether or not the email matched."""

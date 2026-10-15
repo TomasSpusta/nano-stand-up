@@ -3,6 +3,7 @@
 import smtplib
 from dataclasses import dataclass
 from email.message import EmailMessage
+from email.policy import default
 from typing import Protocol
 
 
@@ -45,13 +46,18 @@ class SmtpSettings:
     starttls: bool = False
 
 
+# Python folds a header longer than 78 characters. A link has no spaces to fold at, so Python would encode the
+# List-Unsubscribe header instead, and mail apps would not see a link there. 998 is the line limit of RFC 5322.
+_POLICY = default.clone(max_line_length=998)
+
+
 class SmtpMailSender:
     def __init__(self, settings: SmtpSettings, timeout_seconds: float = 30) -> None:
         self._settings = settings
         self._timeout = timeout_seconds
 
     def send(self, message: Message) -> None:
-        email = EmailMessage()
+        email = EmailMessage(policy=_POLICY)
         email["From"] = message.from_address
         email["To"] = message.to
         email["Subject"] = message.subject
