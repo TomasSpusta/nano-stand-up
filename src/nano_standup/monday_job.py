@@ -20,6 +20,7 @@ from nano_standup.domain import PRAGUE, Clock, Instrument, Week, WorkingHours
 from nano_standup.mail import MailSender, Message, RecipientRefused
 from nano_standup.sent_briefs import SentBriefStore
 from nano_standup.subscriptions import Subscription, SubscriptionStore
+from nano_standup.wording import counted, day_month_year
 
 log = logging.getLogger(__name__)
 
@@ -95,12 +96,12 @@ def run_monday_job(
     log.info(
         "Monday job for the week of %s: %s processed, %s sent, %s already sent before, %s failed,"
         " %s sent but not recorded",
-        _date(week),
-        _count(len({s.instrument_id for s in to_send}), "instrument"),
-        _count(sent, "brief"),
-        _count(already_sent, "brief"),
-        _count(len(outcome.failed), "brief"),
-        _count(len(outcome.not_recorded), "brief"),
+        day_month_year(week.monday),
+        counted(len({s.instrument_id for s in to_send}), "instrument"),
+        counted(sent, "brief"),
+        counted(already_sent, "brief"),
+        counted(len(outcome.failed), "brief"),
+        counted(len(outcome.not_recorded), "brief"),
     )
     return MondayJobResult(
         sent=sent,
@@ -133,7 +134,7 @@ def _send_with_retries(
             outcome.failed += to_retry
             return outcome
         log.warning(
-            "%s failed, trying again at %s", _count(len(to_retry), "brief"), f"{next_try.astimezone(PRAGUE):%H:%M}"
+            "%s failed, trying again at %s", counted(len(to_retry), "brief"), f"{next_try.astimezone(PRAGUE):%H:%M}"
         )
         sleep(max(next_try - clock(), timedelta()))
         pending = [f.subscription for f in to_retry]
@@ -257,10 +258,10 @@ def _send_error_report(mail_sender: MailSender, from_address: str, to: str, week
         if not failures:
             continue
         lines = [f"{f.describe()}: {f.error}" for f in failures]
-        subject_parts.append(f"{_count(len(failures), 'brief')} {label}")
+        subject_parts.append(f"{counted(len(failures), 'brief')} {label}")
         text_parts.append("\n".join([intro, "", *(f"- {line}" for line in lines)]) + "\n")
         html_parts.append(f"<p>{escape(intro)}</p><ul>{''.join(f'<li>{escape(line)}</li>' for line in lines)}</ul>")
-    subject = f"Nano Stand-up: {', '.join(subject_parts)} for the week of {_date(week)}"
+    subject = f"Nano Stand-up: {', '.join(subject_parts)} for the week of {day_month_year(week.monday)}"
     message = Message(
         from_address=from_address, to=to, subject=subject, html="".join(html_parts), text="\n".join(text_parts)
     )
@@ -270,12 +271,3 @@ def _send_error_report(mail_sender: MailSender, from_address: str, to: str, week
         log.error("Cannot send the error report to the service admin %s: %s", to, error)
         return
     log.info("Sent the error report to the service admin %s", to)
-
-
-def _date(week: Week) -> str:
-    monday = week.monday
-    return f"{monday.day}. {monday.month}. {monday.year}"
-
-
-def _count(number: int, noun: str) -> str:
-    return f"{number} {noun}" if number == 1 else f"{number} {noun}s"
