@@ -17,7 +17,7 @@ from nano_standup.mail import SmtpMailSender
 from nano_standup.monday_job import run_monday_job
 from nano_standup.service_admin import NotTheGuarantor, add_subscription
 from nano_standup.subscriptions import SubscriptionStore
-from nano_standup.web import create_app, unsubscribe_url
+from nano_standup.web import create_app, unsubscribe_link_for
 
 log = logging.getLogger("nano_standup")
 
@@ -70,7 +70,7 @@ def _run_monday_job(settings: Settings) -> int:
         clock=system_clock,
         from_address=settings.mail_from,
         working_hours=settings.working_hours,
-        unsubscribe_url=functools.partial(unsubscribe_url, public_base_url),
+        unsubscribe_link_for=functools.partial(unsubscribe_link_for, public_base_url),
     )
     log.info("Monday job done: %d briefs sent", sent)
     return 0

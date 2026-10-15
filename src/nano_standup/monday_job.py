@@ -19,11 +19,11 @@ def run_monday_job(
     clock: Clock,
     from_address: str,
     working_hours: WorkingHours,
-    unsubscribe_url: Callable[[str], str],
+    unsubscribe_link_for: Callable[[str], str],
 ) -> int:
     """Send the briefs and return how many went out. The week is the one that holds today in Prague.
 
-    `unsubscribe_url` turns a token into the unsubscribe link of a brief.
+    `unsubscribe_link_for` turns a token into the unsubscribe link of a brief.
     """
     now = clock()
     week = Week.containing(now.astimezone(PRAGUE).date())
@@ -31,7 +31,8 @@ def run_monday_job(
     for subscription in subscriptions.list_active():
         instrument = source.get_instrument(subscription.instrument_id)
         reservations = source.get_reservations(instrument.id, week)
-        unsubscribe_link = unsubscribe_url(subscriptions.unsubscribe_token(subscription, now))
+        # The link's row is stored before the brief is sent. A failed send leaves a link nobody got, which is harmless.
+        unsubscribe_link = unsubscribe_link_for(subscriptions.unsubscribe_token(subscription, now))
         brief = build_brief(instrument, week, reservations, now, working_hours, unsubscribe_link)
         mail_sender.send(
             Message(

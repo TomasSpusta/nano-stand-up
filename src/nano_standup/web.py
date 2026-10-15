@@ -48,7 +48,7 @@ UNSUBSCRIBE_STATUS = {
 }
 
 
-def unsubscribe_url(public_base_url: str, token: str) -> str:
+def unsubscribe_link_for(public_base_url: str, token: str) -> str:
     """The unsubscribe link in a brief. The web app answers it."""
     return f"{public_base_url.rstrip('/')}/unsubscribe?{urllib.parse.urlencode({'token': token})}"
 

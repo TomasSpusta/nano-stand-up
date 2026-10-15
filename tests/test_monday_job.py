@@ -32,7 +32,7 @@ def _run(
         clock=lambda: now,
         from_address="standup@example.org",
         working_hours=WORKING_HOURS,
-        unsubscribe_url=lambda token: f"https://standup.example.org/unsubscribe?token={token}",
+        unsubscribe_link_for=lambda token: f"https://standup.example.org/unsubscribe?token={token}",
     )
 
 

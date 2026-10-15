@@ -12,7 +12,7 @@ from nano_standup.domain import Guarantor, Instrument, InstrumentName, Reservati
 from nano_standup.mail import InMemoryMailSender, MailSender, Message
 from nano_standup.subscription_request import CONFIRM_MAIL_GAP
 from nano_standup.subscriptions import CONFIRM_LINK_LIFETIME, Subscription, SubscriptionStore
-from nano_standup.web import create_app, unsubscribe_url
+from nano_standup.web import create_app, unsubscribe_link_for
 
 from helpers import GUARANTOR, INSTRUMENT, visible_text
 
@@ -71,7 +71,7 @@ class Site:
     def unsubscribe_link(self, subscription: Subscription) -> str:
         """The unsubscribe link a brief of the subscription has, without the base URL."""
         token = self.store.unsubscribe_token(subscription, self.clock())
-        return unsubscribe_url(BASE_URL, token).removeprefix(BASE_URL)
+        return unsubscribe_link_for(BASE_URL, token).removeprefix(BASE_URL)
 
     def press_unsubscribe(self, link: str) -> Response:
         """What a person does: open the link, then press the button on the page."""
