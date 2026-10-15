@@ -1,7 +1,8 @@
-"""The whole brief, compared with saved copies, so a change to the brief code cannot change what the guarantor gets by accident.
+"""The whole brief, compared with saved copies.
 
-When a change to the brief is on purpose, write new copies with `UPDATE_GOLDEN=1 uv run pytest tests/test_brief_golden.py`
-and check the diff of the files in tests/golden/.
+So a change to the brief code cannot change what the guarantor gets by accident.
+When a change to the brief is on purpose, write new copies with
+`UPDATE_GOLDEN=1 uv run pytest tests/test_brief_golden.py` and check the diff of the files in tests/golden/.
 """
 
 import os
@@ -22,7 +23,9 @@ BUILT_AT = datetime(2026, 10, 19, 8, 0, tzinfo=ZoneInfo("Europe/Prague"))
 
 # One of each thing a brief can show.
 FULL_WEEK = [
-    reservation("2026-10-18T22:00", "2026-10-19T06:00", user_name="Jana Smyslena", experiment_plan="Overnight EDS mapping"),
+    reservation(
+        "2026-10-18T22:00", "2026-10-19T06:00", user_name="Jana Smyslena", experiment_plan="Overnight EDS mapping"
+    ),
     reservation("2026-10-19T08:30", "2026-10-19T11:00", user_name="Petr Vymysleny", note="Bring own holder"),
     reservation(
         "2026-10-19T14:00",
@@ -31,7 +34,9 @@ FULL_WEEK = [
         experiment_plan="",
         private_note="Paid by the group\nCheck the invoice",
     ),
-    reservation("2026-10-20T15:00", "2026-10-21T13:00", user_name="Karel Neexistujici", status=ReservationStatus.REQUESTED),
+    reservation(
+        "2026-10-20T15:00", "2026-10-21T13:00", user_name="Karel Neexistujici", status=ReservationStatus.REQUESTED
+    ),
     reservation(
         "2026-10-21T09:00",
         "2026-10-21T10:00",

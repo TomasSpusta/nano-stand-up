@@ -51,7 +51,9 @@ def test_reservations_are_grouped_by_day_in_time_order() -> None:
     reservations = [
         reservation("2026-10-21T13:00", "2026-10-21T15:00", user_name="Jana Smyslena"),
         reservation("2026-10-19T14:00", "2026-10-19T16:00", user_name="Karel Neexistujici"),
-        reservation("2026-10-19T08:30", "2026-10-19T11:00", user_name="Petr Vymysleny", project_code="2026-123456/RG-1-01"),
+        reservation(
+            "2026-10-19T08:30", "2026-10-19T11:00", user_name="Petr Vymysleny", project_code="2026-123456/RG-1-01"
+        ),
     ]
 
     text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT, WORKING_HOURS).html)
@@ -115,7 +117,11 @@ def test_a_cancelled_reservation_is_crossed_out_marked_and_counted_apart() -> No
     reservations = [
         reservation("2026-10-19T09:00", "2026-10-19T12:00", user_name="Petr Vymysleny"),
         reservation(
-            "2026-10-20T13:00", "2026-10-20T15:00", user_name="Jana Smyslena", experiment_plan="", status=ReservationStatus.CANCELLED
+            "2026-10-20T13:00",
+            "2026-10-20T15:00",
+            user_name="Jana Smyslena",
+            experiment_plan="",
+            status=ReservationStatus.CANCELLED,
         ),
     ]
 
@@ -135,7 +141,9 @@ def test_a_cancelled_reservation_is_crossed_out_marked_and_counted_apart() -> No
 
 def test_a_requested_reservation_is_marked_highlighted_and_still_counted() -> None:
     reservations = [
-        reservation("2026-10-19T09:00", "2026-10-19T12:00", user_name="Jana Smyslena", status=ReservationStatus.REQUESTED)
+        reservation(
+            "2026-10-19T09:00", "2026-10-19T12:00", user_name="Jana Smyslena", status=ReservationStatus.REQUESTED
+        )
     ]
 
     html = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT, WORKING_HOURS).html
@@ -287,9 +295,15 @@ def test_the_plain_text_version_shows_the_same_week() -> None:
             private_note="Paid by the group",
         ),
         reservation(
-            "2026-10-20T09:00", "2026-10-20T09:30", user_name="Karel Neexistujici", experiment_plan="", status=ReservationStatus.REQUESTED
+            "2026-10-20T09:00",
+            "2026-10-20T09:30",
+            user_name="Karel Neexistujici",
+            experiment_plan="",
+            status=ReservationStatus.REQUESTED,
         ),
-        reservation("2026-10-22T09:00", "2026-10-22T10:00", user_name="Petr Vymysleny", status=ReservationStatus.CANCELLED),
+        reservation(
+            "2026-10-22T09:00", "2026-10-22T10:00", user_name="Petr Vymysleny", status=ReservationStatus.CANCELLED
+        ),
     ]
 
     text = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT, WORKING_HOURS).text
@@ -520,7 +534,9 @@ def test_a_cancelled_reservation_needs_no_experiment_plan_and_no_after_hours_che
 def test_cancelled_and_requested_reservations_are_heads_ups() -> None:
     reservations = [
         reservation("2026-10-19T09:00", "2026-10-19T10:00", user_name="Petr Vymysleny"),
-        reservation("2026-10-20T09:00", "2026-10-20T10:00", user_name="Jana Smyslena", status=ReservationStatus.CANCELLED),
+        reservation(
+            "2026-10-20T09:00", "2026-10-20T10:00", user_name="Jana Smyslena", status=ReservationStatus.CANCELLED
+        ),
         reservation(
             "2026-10-21T09:00", "2026-10-21T10:00", user_name="Karel Neexistujici", status=ReservationStatus.REQUESTED
         ),

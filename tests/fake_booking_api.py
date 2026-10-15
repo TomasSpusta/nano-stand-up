@@ -52,13 +52,17 @@ class FakeBookingApi:
             return page
         raise BookingApiError(path, 404, "Not Found")
 
-    def _page(self, path: str, items: list[dict[str, Any]], params: Params, time_fields: set[str]) -> list[dict[str, Any]]:  # Any: JSON.
+    def _page(
+        self, path: str, items: list[dict[str, Any]], params: Params, time_fields: set[str]
+    ) -> list[dict[str, Any]]:  # Any: JSON.
         limit = int(str(params.get("limit", 20)))
         if limit > MAX_PAGE_SIZE:
             raise BookingApiError(path, 500, "Internal Server Error")
         page = int(str(params.get("page", 1)))
         filters = params.get("filters[]", [])
-        matching = [x for x in items if _matches(x, filters if isinstance(filters, list) else [str(filters)], time_fields)]
+        matching = [
+            x for x in items if _matches(x, filters if isinstance(filters, list) else [str(filters)], time_fields)
+        ]
         return matching[(page - 1) * limit : page * limit]
 
 
@@ -79,7 +83,9 @@ def _matches(item: dict[str, Any], filters: list[str], time_fields: set[str]) ->
     return True
 
 
-def instrument_json(id: str, alias: str, name_en: str | None, name_cz: str, guarantor: dict[str, Any] | None) -> dict[str, Any]:  # Any: mirrors the API's JSON.
+def instrument_json(
+    id: str, alias: str, name_en: str | None, name_cz: str, guarantor: dict[str, Any] | None
+) -> dict[str, Any]:  # Any: mirrors the API's JSON.
     return {"id": id, "ge_alias": alias, "ge_nameen": name_en, "name": name_cz, "ge_ownerid": guarantor}
 
 
@@ -98,7 +104,13 @@ SEM_ID = "equip-sem"
 
 def sem_json(guarantor_email: str = "hana.testova@example.org") -> dict[str, Any]:  # Any: mirrors the API's JSON.
     """The made-up microscope most tests use."""
-    return instrument_json(SEM_ID, "TEST-SEM", "Test Electron Microscope", "Testovaci mikroskop", guarantor_json("Hana", "Testova", guarantor_email))
+    return instrument_json(
+        SEM_ID,
+        "TEST-SEM",
+        "Test Electron Microscope",
+        "Testovaci mikroskop",
+        guarantor_json("Hana", "Testova", guarantor_email),
+    )
 
 
 def reservation_json(
@@ -127,10 +139,24 @@ def reservation_json(
             {"partyid": {"id": f"contact-{firstname}"}, "participationtypemask": 5},
             {"partyid": {"id": instrument_id}, "participationtypemask": 10},
         ],
-        "ge_realised_for_contactid": {"id": f"contact-{firstname}-{lastname}", "firstname": firstname, "lastname": lastname},
+        "ge_realised_for_contactid": {
+            "id": f"contact-{firstname}-{lastname}",
+            "firstname": firstname,
+            "lastname": lastname,
+        },
     }
 
 
-def recording(reservation_id: str | None, start: str, experiment_plan: str | None) -> dict[str, Any]:  # Any: mirrors the API's JSON.
-    session = {"id": f"session-{reservation_id}", "ge_serviceappointmentid": {"id": reservation_id} if reservation_id else None}
-    return {"id": f"rec-{reservation_id}", "new_start": start, "new_plan_experimentu_new": experiment_plan, "ge_sessionid": session}
+def recording(
+    reservation_id: str | None, start: str, experiment_plan: str | None
+) -> dict[str, Any]:  # Any: mirrors the API's JSON.
+    session = {
+        "id": f"session-{reservation_id}",
+        "ge_serviceappointmentid": {"id": reservation_id} if reservation_id else None,
+    }
+    return {
+        "id": f"rec-{reservation_id}",
+        "new_start": start,
+        "new_plan_experimentu_new": experiment_plan,
+        "ge_sessionid": session,
+    }

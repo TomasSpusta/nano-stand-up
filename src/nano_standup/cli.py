@@ -23,7 +23,9 @@ def system_clock() -> datetime:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="nano-standup", description="Weekly briefs for CF nano instrument guarantors.")
+    parser = argparse.ArgumentParser(
+        prog="nano-standup", description="Weekly briefs for CF nano instrument guarantors."
+    )
     parser.add_argument("--config", type=Path, default=Path(".env"), help="settings file (default: .env)")
     commands = parser.add_subparsers(dest="command", required=True)
     add = commands.add_parser("add-subscription", help="add an active subscription without a confirm link")

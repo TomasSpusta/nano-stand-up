@@ -26,7 +26,9 @@ UNKNOWN_STATUS = 7
 def api() -> FakeBookingApi:
     api = FakeBookingApi()
     api.instruments[SEM] = sem_json("Hana.Testova@example.org")
-    api.instruments[LAB] = instrument_json(LAB, "TEST-LAB", None, "Testovaci laborator", guarantor_json("Ota", "Zkusebni", "ota.zkusebni@example.org"))
+    api.instruments[LAB] = instrument_json(
+        LAB, "TEST-LAB", None, "Testovaci laborator", guarantor_json("Ota", "Zkusebni", "ota.zkusebni@example.org")
+    )
     return api
 
 
@@ -47,18 +49,33 @@ def test_get_instrument_raises_instrument_not_found_for_an_unknown_id(api: FakeB
 
 
 def test_get_instrument_refuses_an_instrument_without_a_guarantor_email(api: FakeBookingApi) -> None:
-    api.instruments["equip-x"] = instrument_json("equip-x", "TEST-X", "Test X", "Test X", guarantor_json("Nikdo", "Nikdo", None))
+    api.instruments["equip-x"] = instrument_json(
+        "equip-x", "TEST-X", "Test X", "Test X", guarantor_json("Nikdo", "Nikdo", None)
+    )
 
     with pytest.raises(BookingDataError, match="TEST-X"):
         ApiBookingSource(api).get_instrument("equip-x")
 
 
-def test_get_reservations_returns_the_instrument_week_with_user_project_and_experiment_plan(api: FakeBookingApi) -> None:
+def test_get_reservations_returns_the_instrument_week_with_user_project_and_experiment_plan(
+    api: FakeBookingApi,
+) -> None:
     api.reservations = [
-        reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T11:30:00", subject="2026-123456/RG-1-01", firstname="Jana", lastname="Smyslena"),
+        reservation_json(
+            "r1",
+            SEM,
+            "2026-10-20T09:00:00",
+            "2026-10-20T11:30:00",
+            subject="2026-123456/RG-1-01",
+            firstname="Jana",
+            lastname="Smyslena",
+        ),
         reservation_json("r2", LAB, "2026-10-20T09:00:00", "2026-10-20T10:00:00"),
     ]
-    api.recordings = [recording("r1", "2026-10-20T09:00:00", "SEM imaging of thin films"), recording("r2", "2026-10-20T09:00:00", "Other")]
+    api.recordings = [
+        recording("r1", "2026-10-20T09:00:00", "SEM imaging of thin films"),
+        recording("r2", "2026-10-20T09:00:00", "Other"),
+    ]
 
     [reservation] = ApiBookingSource(api).get_reservations(SEM, WEEK)
 
@@ -84,7 +101,9 @@ def test_get_reservations_covers_monday_0000_to_sunday_2359(api: FakeBookingApi)
     assert ids == ["runs-in", "first", "last"]
 
 
-def test_get_reservations_finds_the_experiment_plan_of_a_reservation_that_started_weeks_before(api: FakeBookingApi) -> None:
+def test_get_reservations_finds_the_experiment_plan_of_a_reservation_that_started_weeks_before(
+    api: FakeBookingApi,
+) -> None:
     api.reservations = [
         reservation_json("long", SEM, "2026-09-28T09:00:00", "2026-10-20T09:00:00"),
         reservation_json("short", SEM, "2026-10-21T09:00:00", "2026-10-21T10:00:00"),
@@ -131,7 +150,10 @@ def test_get_reservations_gives_an_empty_experiment_plan_when_it_is_missing(api:
         reservation_json("no-recording", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00"),
         reservation_json("null-plan", SEM, "2026-10-21T09:00:00", "2026-10-21T10:00:00"),
     ]
-    api.recordings = [recording("null-plan", "2026-10-21T09:00:00", None), recording(None, "2026-10-21T09:00:00", "No session")]
+    api.recordings = [
+        recording("null-plan", "2026-10-21T09:00:00", None),
+        recording(None, "2026-10-21T09:00:00", "No session"),
+    ]
 
     experiment_plans = {r.id: r.experiment_plan for r in ApiBookingSource(api).get_reservations(SEM, WEEK)}
 
@@ -173,9 +195,31 @@ def test_get_instrument_names_the_instrument_when_its_id_is_missing(api: FakeBoo
 
 def test_get_reservations_reads_status_note_and_private_note(api: FakeBookingApi) -> None:
     api.reservations = [
-        reservation_json("reserved", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", statuscode=RESERVED_STATUS, note=None, private_note=None),
-        reservation_json("requested", SEM, "2026-10-21T09:00:00", "2026-10-21T10:00:00", statuscode=REQUESTED_STATUS, note="Bring own holder"),
-        reservation_json("cancelled", SEM, "2026-10-22T09:00:00", "2026-10-22T10:00:00", statuscode=CANCELLED_STATUS, private_note="Paid by the group"),
+        reservation_json(
+            "reserved",
+            SEM,
+            "2026-10-20T09:00:00",
+            "2026-10-20T10:00:00",
+            statuscode=RESERVED_STATUS,
+            note=None,
+            private_note=None,
+        ),
+        reservation_json(
+            "requested",
+            SEM,
+            "2026-10-21T09:00:00",
+            "2026-10-21T10:00:00",
+            statuscode=REQUESTED_STATUS,
+            note="Bring own holder",
+        ),
+        reservation_json(
+            "cancelled",
+            SEM,
+            "2026-10-22T09:00:00",
+            "2026-10-22T10:00:00",
+            statuscode=CANCELLED_STATUS,
+            private_note="Paid by the group",
+        ),
     ]
 
     reservations = {r.id: r for r in ApiBookingSource(api).get_reservations(SEM, WEEK)}
@@ -191,7 +235,9 @@ def test_get_reservations_reads_status_note_and_private_note(api: FakeBookingApi
 
 
 def test_get_reservations_treats_a_cancelled_state_as_cancelled_whatever_its_status(api: FakeBookingApi) -> None:
-    api.reservations = [reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", statuscode=RESERVED_STATUS)]
+    api.reservations = [
+        reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", statuscode=RESERVED_STATUS)
+    ]
     api.reservations[0]["statecode"] = CANCELLED_STATE
 
     [reservation] = ApiBookingSource(api).get_reservations(SEM, WEEK)
@@ -202,7 +248,9 @@ def test_get_reservations_treats_a_cancelled_state_as_cancelled_whatever_its_sta
 def test_get_reservations_logs_an_unknown_status_and_shows_it_as_reserved(
     api: FakeBookingApi, caplog: pytest.LogCaptureFixture
 ) -> None:
-    api.reservations = [reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", statuscode=UNKNOWN_STATUS)]
+    api.reservations = [
+        reservation_json("r1", SEM, "2026-10-20T09:00:00", "2026-10-20T10:00:00", statuscode=UNKNOWN_STATUS)
+    ]
 
     [reservation] = ApiBookingSource(api).get_reservations(SEM, WEEK)
 

@@ -84,7 +84,10 @@ def test_a_brief_shows_cancelled_and_overnight_reservations_in_both_versions(tmp
             INSTRUMENT.id: [
                 reservation("2026-10-20T15:00", "2026-10-21T13:00", user_name="Jana Smyslena"),
                 reservation(
-                    "2026-10-22T09:00", "2026-10-22T10:00", user_name="Karel Neexistujici", status=ReservationStatus.CANCELLED
+                    "2026-10-22T09:00",
+                    "2026-10-22T10:00",
+                    user_name="Karel Neexistujici",
+                    status=ReservationStatus.CANCELLED,
                 ),
             ],
         },

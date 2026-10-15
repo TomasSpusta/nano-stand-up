@@ -17,7 +17,7 @@ Copy `.env.example` to `.env` and fill it in.
 `WORKING_DAY_START` and `WORKING_DAY_END` (default 07:00 and 19:00) set the working day, Monday to Friday.
 The Heads-up section of the brief lists the reservations outside it.
 
-## Test
+## Test and lint
 
 ```bash
 uv run pytest
@@ -25,6 +25,10 @@ uv run pytest
 
 ```bash
 uv run mypy
+```
+
+```bash
+uv run ruff check
 ```
 
 The tests run offline and use made-up data only.

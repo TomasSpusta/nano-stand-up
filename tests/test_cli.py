@@ -20,15 +20,19 @@ def write_config(tmp_path: Path, booking_url: str) -> Path:
 
 def test_add_subscription_stores_the_guarantor_subscription(tmp_path: Path) -> None:
     with local_booking_server({"equip-sem": SEM}) as server:
-        code = main(["--config", str(write_config(tmp_path, server.url)), "add-subscription", "equip-sem", "Hana.Testova@example.org"])
+        config = write_config(tmp_path, server.url)
+        code = main(["--config", str(config), "add-subscription", "equip-sem", "Hana.Testova@example.org"])
 
     assert code == 0
-    assert SubscriptionStore(tmp_path / "data/standup.sqlite3").list_active() == [Subscription("equip-sem", "hana.testova@example.org")]
+    assert SubscriptionStore(tmp_path / "data/standup.sqlite3").list_active() == [
+        Subscription("equip-sem", "hana.testova@example.org")
+    ]
 
 
 def test_add_subscription_refuses_another_email_with_exit_code_2(tmp_path: Path) -> None:
     with local_booking_server({"equip-sem": SEM}) as server:
-        code = main(["--config", str(write_config(tmp_path, server.url)), "add-subscription", "equip-sem", "someone@example.org"])
+        config = write_config(tmp_path, server.url)
+        code = main(["--config", str(config), "add-subscription", "equip-sem", "someone@example.org"])
 
     assert code == 2
     assert SubscriptionStore(tmp_path / "data/standup.sqlite3").list_active() == []
