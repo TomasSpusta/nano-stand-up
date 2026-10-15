@@ -1,3 +1,9 @@
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+
 import pytest
 
 from nano_standup.booking_api import BookingApiError, BookingDataError, HttpBookingApi
@@ -20,6 +26,30 @@ def test_logs_in_once_and_sends_list_filters_as_repeated_parameters() -> None:
     assert server.queries[0] == {"filters[]": ["a:eq:1", "b:eq:2"], "limit": ["50"]}
 
 
+def test_an_expired_token_logs_in_again_and_repeats_the_request() -> None:
+    with local_booking_server({"equip-sem": SEM}, token_uses=1) as server:
+        api = HttpBookingApi(server.url, API_KEY)
+        api.get("/api/equipment/equip-sem", {})
+
+        # The first token is used up, as when it expires during the Monday job retries.
+        second = api.get("/api/equipment/equip-sem", {})
+
+    assert second["ge_alias"] == "TEST-SEM"
+    assert server.logins == 2
+
+
+def test_a_401_after_a_fresh_login_raises_the_error() -> None:
+    with local_booking_server({"equip-sem": SEM}, token_uses=0) as server:
+        api = HttpBookingApi(server.url, API_KEY)
+
+        with pytest.raises(BookingApiError, match="/api/equipment/equip-sem failed: HTTP 401") as error:
+            api.get("/api/equipment/equip-sem", {})
+
+    assert error.value.status == 401
+    # The first login and one more, not a loop.
+    assert server.logins == 2
+
+
 def test_an_http_error_names_the_request_and_status() -> None:
     with local_booking_server({}) as server:
         api = HttpBookingApi(server.url, API_KEY)
@@ -36,6 +66,9 @@ def test_a_wrong_api_key_fails_at_login() -> None:
 
         with pytest.raises(BookingApiError, match="/api/login failed: HTTP 401"):
             api.get("/api/equipment/equip-sem", {})
+
+    # A wrong API key is not tried twice.
+    assert server.login_attempts == 1
 
 
 def test_an_unreachable_api_names_the_request() -> None:
@@ -55,4 +88,49 @@ def test_a_login_answer_without_a_token_names_the_request() -> None:
         api = HttpBookingApi(server.url, API_KEY)
 
         with pytest.raises(BookingDataError, match="/api/login.*accessToken"):
+            api.get("/api/equipment/equip-sem", {})
+
+
+@contextmanager
+def _raw_server(body: bytes, content_length: int) -> Iterator[str]:
+    """A server on localhost that answers every request with the same body, such as a proxy's HTML error page."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: Any) -> None:  # Any: matches the base class.
+            pass
+
+        def _answer(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Length", str(content_length))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = do_POST = _answer
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_an_answer_that_is_not_json_names_the_request() -> None:
+    page = b"<html>Bad gateway</html>"
+    with _raw_server(page, len(page)) as url:
+        api = HttpBookingApi(url, API_KEY)
+
+        with pytest.raises(BookingApiError, match="/api/login failed: the answer is not JSON"):
+            api.get("/api/equipment/equip-sem", {})
+
+
+def test_a_cut_off_answer_names_the_request() -> None:
+    body = b'{"accessToken": "te'
+    with _raw_server(body, len(body) + 100) as url:
+        api = HttpBookingApi(url, API_KEY)
+
+        with pytest.raises(BookingApiError, match="/api/login failed: IncompleteRead"):
             api.get("/api/equipment/equip-sem", {})

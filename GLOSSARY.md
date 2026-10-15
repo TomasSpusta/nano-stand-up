@@ -26,8 +26,14 @@ _Avoid_: Admin, operator, maintainer
 **Subscription**:
 A guarantor's confirmed request to get the brief for one instrument.
 It is active only after the guarantor clicks the confirm link sent to their booking-system email.
-It ends when that person is no longer the instrument's guarantor.
+It ends when that person is no longer the instrument's guarantor: the Monday job checks this before each brief.
 _Avoid_: Sign-up, registration, newsletter
+
+**Stop notice**:
+The short email the guarantor whose subscription ended gets instead of the brief, when the booking system no longer lists their email as the instrument's guarantor.
+It says why the brief stopped and that they can subscribe again if they are still the guarantor.
+It never shows reservations or who the guarantor is now.
+_Avoid_: Note, notification, goodbye mail
 
 **Reservation list**:
 The part of a brief that shows each reservation as booked, with no AI rewording.
@@ -66,6 +72,8 @@ _Avoid_: Certification, training, licence
 
 **New user**:
 A user whose reservation is one of their first 3 on the instrument since the start of their earliest certificate for it.
+The setting `NEW_USER_RESERVATIONS` can change the 3.
+A user with no certificate for the instrument is not a new user.
 _Avoid_: First-timer, newcomer, beginner
 
 **Note**:

@@ -6,11 +6,14 @@ from datetime import datetime, time
 from pathlib import Path
 
 from nano_standup.domain import WorkingHours
+from nano_standup.heads_ups import HeadsUpSettings
 from nano_standup.mail import SmtpSettings
 
-# Used when the settings leave out WORKING_DAY_START or WORKING_DAY_END.
+# Used when the settings leave out WORKING_DAY_START, WORKING_DAY_END, or NEW_USER_RESERVATIONS.
 DEFAULT_WORKING_DAY_START = "07:00"
 DEFAULT_WORKING_DAY_END = "19:00"
+DEFAULT_NEW_USER_RESERVATIONS = "3"
+
 # Used when the settings leave out WEB_HOST or WEB_PORT. Only this server can reach the web app; a proxy in front
 # of it gives HTTPS.
 DEFAULT_WEB_HOST = "127.0.0.1"
@@ -27,9 +30,11 @@ class Settings:
     booking_api_key: str
     smtp: SmtpSettings
     mail_from: str
+    # Gets the error report when briefs still fail at the retry deadline.
+    service_admin_email: str
     database_path: Path
-    # The Heads-up section points out reservations outside these hours.
-    working_hours: WorkingHours
+    # The limits of the heads-up rules, such as the working hours.
+    heads_up: HeadsUpSettings
     # The address guarantors open the web app at, without a trailing slash. Confirm links start with it.
     # Only the web app needs it, so it may be missing for the other commands.
     public_base_url: str | None
@@ -72,6 +77,11 @@ def load_settings(path: Path, environ: Mapping[str, str]) -> Settings:
     except ValueError as error:
         raise ConfigError(f"Settings WORKING_DAY_START and WORKING_DAY_END: {error}") from None
 
+    new_user_text = optional("NEW_USER_RESERVATIONS") or DEFAULT_NEW_USER_RESERVATIONS
+    # isascii: isdigit alone takes digits such as "²", which int() refuses.
+    if not (new_user_text.isascii() and new_user_text.isdigit()) or int(new_user_text) < 1:
+        raise ConfigError(f"Setting NEW_USER_RESERVATIONS must be a whole number of 1 or more, got {new_user_text!r}")
+
     starttls_text = (optional("SMTP_STARTTLS") or "false").lower()
     if starttls_text not in ("true", "false"):
         raise ConfigError(f"Setting SMTP_STARTTLS must be true or false, got {starttls_text!r}")
@@ -91,8 +101,9 @@ def load_settings(path: Path, environ: Mapping[str, str]) -> Settings:
             starttls=starttls_text == "true",
         ),
         mail_from=required("MAIL_FROM"),
+        service_admin_email=required("SERVICE_ADMIN_EMAIL"),
         database_path=path.parent / required("DATABASE_PATH"),
-        working_hours=working_hours,
+        heads_up=HeadsUpSettings(working_hours=working_hours, new_user_reservations=int(new_user_text)),
         public_base_url=public_base_url.rstrip("/") if public_base_url else None,
         web_host=optional("WEB_HOST") or DEFAULT_WEB_HOST,
         web_port=number("WEB_PORT", optional("WEB_PORT") or DEFAULT_WEB_PORT),

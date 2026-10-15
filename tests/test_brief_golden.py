@@ -13,9 +13,9 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from nano_standup.brief import Brief, build_brief
-from nano_standup.domain import Reservation, ReservationStatus, Week
+from nano_standup.domain import Certificate, Reservation, ReservationStatus, UserFacts, Week
 
-from helpers import INSTRUMENT, WORKING_HOURS, reservation
+from helpers import GUARANTOR, GUARANTOR_USER_ID, HEADS_UP_SETTINGS, INSTRUMENT, experienced_users, reservation
 
 GOLDEN = Path(__file__).parent / "golden"
 WEEK = Week(date(2026, 10, 19))
@@ -46,11 +46,29 @@ FULL_WEEK = [
         note="Imaging of samples",
     ),
     reservation("2026-10-24T10:00", "2026-11-02T10:00", user_name="Petr Vymysleny", status=ReservationStatus.REQUESTED),
+    reservation("2026-10-22T09:00", "2026-10-22T12:00", user_name="Lenka Vymyslena"),
+    # The guarantor's own reservation: she needs no certificate on her instrument.
+    reservation("2026-10-23T09:00", "2026-10-23T10:00", user_name=GUARANTOR.name),
 ]
+# Jana and Eva are experienced users. Petr is a new user: his first reservation was on 5 October.
+# Karel's certificate has expired. Lenka has none. The guarantor has none either.
+FULL_WEEK_USER_FACTS = {
+    **experienced_users(FULL_WEEK),
+    "user-Petr Vymysleny": UserFacts(
+        [Certificate(date(2026, 10, 1), date(2027, 10, 1))],
+        [datetime(2026, 10, 5, 9, 0), datetime(2026, 10, 19, 8, 30), datetime(2026, 10, 24, 10, 0)],
+    ),
+    "user-Karel Neexistujici": UserFacts(
+        [Certificate(date(2023, 6, 1), date(2026, 5, 31))],
+        [datetime(2023, 7, day, 9, 0) for day in (3, 4, 5)],
+    ),
+    "user-Lenka Vymyslena": UserFacts([], []),
+    GUARANTOR_USER_ID: UserFacts([], []),
+}
 
 
 def _brief(reservations: list[Reservation]) -> Brief:
-    return build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT, WORKING_HOURS)
+    return build_brief(INSTRUMENT, WEEK, reservations, FULL_WEEK_USER_FACTS, BUILT_AT, HEADS_UP_SETTINGS)
 
 
 def _golden_path(name: str) -> Path:

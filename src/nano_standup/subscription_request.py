@@ -15,10 +15,10 @@ from nano_standup.domain import (
     Instrument,
     InstrumentName,
     NotTheGuarantor,
-    day_name,
     normalize_email,
     require_guarantor,
 )
+from nano_standup.formatting import day_month_year, day_name
 from nano_standup.instrument_list import InstrumentListCache
 from nano_standup.mail import MailSender, Message
 from nano_standup.subscriptions import ConfirmLinkProblem, Subscription, SubscriptionStore
@@ -115,7 +115,7 @@ class SubscriptionRequests:
 
 def _confirm_mail(instrument: Instrument, link: str, expires_at: datetime, from_address: str) -> Message:
     expires = expires_at.astimezone(PRAGUE)
-    until = f"{day_name(expires.date())} {expires.day}. {expires.month}. {expires.year} at {expires:%H:%M}"
+    until = f"{day_name(expires.date())} {day_month_year(expires.date())} at {expires:%H:%M}"
     lines = [
         f"Someone asked for the weekly Nano Stand-up brief for {instrument.name} ({instrument.alias}).",
         "It goes to this address because the booking system lists it as the instrument's guarantor email.",

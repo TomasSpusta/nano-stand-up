@@ -3,13 +3,15 @@
 Both versions are drawn from the same content (counts, days, rows), so they always agree.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 
 from nano_standup.brief_content import brief_content
 from nano_standup.brief_html import brief_html
 from nano_standup.brief_text import brief_text
-from nano_standup.domain import Instrument, Reservation, Week, WorkingHours
+from nano_standup.domain import Instrument, Reservation, UserFacts, Week
+from nano_standup.heads_ups import HeadsUpSettings
 
 
 @dataclass(frozen=True)
@@ -23,9 +25,14 @@ def build_brief(
     instrument: Instrument,
     week: Week,
     reservations: list[Reservation],
+    user_facts: Mapping[str, UserFacts],
     built_at: datetime,
-    working_hours: WorkingHours,
+    settings: HeadsUpSettings,
 ) -> Brief:
-    """Build one brief. `built_at` must carry a time zone; the footer shows it in Prague time."""
-    content = brief_content(instrument, week, reservations, built_at, working_hours)
+    """Build one brief.
+
+    `user_facts` by user id, for the heads-up rules about users. A user without facts has no certificate.
+    `built_at` must carry a time zone; the footer shows it in Prague time.
+    """
+    content = brief_content(instrument, week, reservations, user_facts, built_at, settings)
     return Brief(subject=content.subject, html=brief_html(content), text=brief_text(content))

@@ -17,10 +17,17 @@ class LocalBookingServer:
         self,
         instruments: dict[str, Any],  # Any: mirrors the API's JSON.
         login_answer: dict[str, Any],  # Any: mirrors the API's JSON.
+        token_uses: int | None,
     ) -> None:
         self.instruments = instruments
         self.login_answer = login_answer
+        # How many requests each token is good for, or None for no limit.
+        self.token_uses = token_uses
+        # Each token handed out and the requests it has left.
+        self.tokens_left: dict[str, int] = {}
         self.logins = 0
+        # Logins tried, with the right API key or not.
+        self.login_attempts = 0
         self.queries: list[dict[str, list[str]]] = []
         self.url = ""
 
@@ -29,9 +36,15 @@ class LocalBookingServer:
 def local_booking_server(
     instruments: dict[str, Any],  # Any: mirrors the API's JSON.
     login_answer: dict[str, Any] | None = None,  # Any: mirrors the API's JSON.
+    token_uses: int | None = None,
 ) -> Iterator[LocalBookingServer]:
-    """`login_answer` replaces the normal login answer, which holds the access token."""
-    state = LocalBookingServer(instruments, {"accessToken": TOKEN} if login_answer is None else login_answer)
+    """`login_answer` replaces the normal login answer, which holds the access token.
+
+    With `token_uses`, each login hands out a new token that expires after that many requests.
+    """
+    state = LocalBookingServer(
+        instruments, {"accessToken": TOKEN} if login_answer is None else login_answer, token_uses
+    )
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format: str, *args: Any) -> None:  # Any: matches the base class.
@@ -47,14 +60,29 @@ def local_booking_server(
 
         def do_POST(self) -> None:
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            state.login_attempts += 1
             if self.path == "/api/login" and body == {"apiKey": API_KEY}:
                 state.logins += 1
-                self._reply(200, state.login_answer)
+                if state.token_uses is None:
+                    self._reply(200, state.login_answer)
+                else:
+                    token = f"{TOKEN}-{state.logins}"
+                    state.tokens_left[token] = state.token_uses
+                    self._reply(200, {"accessToken": token})
             else:
                 self._reply(401, {"error": "Unauthorized"})
 
+        def _authorized(self) -> bool:
+            token = (self.headers.get("Authorization") or "").removeprefix("Bearer ")
+            if state.token_uses is None:
+                return token == TOKEN
+            if state.tokens_left.get(token, 0) <= 0:
+                return False
+            state.tokens_left[token] -= 1
+            return True
+
         def do_GET(self) -> None:
-            if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+            if not self._authorized():
                 self._reply(401, {"error": "Unauthorized"})
                 return
             url = urlsplit(self.path)

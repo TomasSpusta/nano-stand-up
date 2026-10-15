@@ -9,7 +9,7 @@ from httpx import Response
 
 from nano_standup.booking_api import BookingApiError
 from nano_standup.booking_source import BookingSource, FakeBookingSource, InstrumentNotFound
-from nano_standup.domain import Guarantor, Instrument, InstrumentName, Reservation, Week
+from nano_standup.domain import Guarantor, Instrument, InstrumentName, Reservation, UserFacts, Week
 from nano_standup.mail import InMemoryMailSender, MailSender, Message
 from nano_standup.subscription_request import CONFIRM_MAIL_GAP, SubscriptionRequests
 from nano_standup.subscriptions import CONFIRM_LINK_LIFETIME, Subscription, SubscriptionStore
@@ -24,7 +24,7 @@ OTHER = Instrument(
     id="instr-2",
     name="Test <Chemical> Laboratory",
     alias="TEST-LAB",
-    guarantor=Guarantor(name="Ota Zkusebni", email="ota.zkusebni@example.org"),
+    guarantor=Guarantor(name="Ota Zkusebni", email="ota.zkusebni@example.org", user_id="user-Ota Zkusebni"),
 )
 CONFIRM_LINK = re.compile(re.escape(BASE_URL) + r"/confirm\?token=([A-Za-z0-9_-]+)")
 
@@ -111,6 +111,9 @@ class DownBookingSource:
     def get_reservations(self, instrument_id: str, week: Week) -> list[Reservation]:
         raise BookingApiError("/api/service-appointment", None, "Connection refused")
 
+    def get_user_facts(self, instrument_id: str, user_id: str) -> UserFacts:
+        raise BookingApiError("/api/session", None, "Connection refused")
+
 
 class ChangingSource(FakeBookingSource):
     """A booking system that changes between the steps of a test: the guarantor changes, the instrument leaves it,
@@ -184,7 +187,9 @@ def test_a_matching_email_gets_a_confirm_mail_at_the_booking_system_email(site: 
 
 
 def test_the_confirm_mail_goes_to_the_booking_system_email_not_the_typed_text(tmp_path: Path) -> None:
-    instrument = Instrument("instr-3", "Test Mill", "TEST-MILL", Guarantor("Eva Pokusna", "Eva.Pokusna@Example.org"))
+    instrument = Instrument(
+        "instr-3", "Test Mill", "TEST-MILL", Guarantor("Eva Pokusna", "Eva.Pokusna@Example.org", "user-Eva Pokusna")
+    )
     site = Site(tmp_path, FakeBookingSource([instrument]))
 
     site.subscribe(instrument.id, "eva.pokusna@example.org")
@@ -396,7 +401,7 @@ def test_pressing_confirm_works_when_the_guarantor_email_changed_only_its_case(t
     source = ChangingSource()
     site = Site(tmp_path, source)
     site.subscribe(INSTRUMENT.id, GUARANTOR.email)
-    source.guarantor = Guarantor(GUARANTOR.name, " " + GUARANTOR.email.upper())
+    source.guarantor = Guarantor(GUARANTOR.name, " " + GUARANTOR.email.upper(), GUARANTOR.user_id)
 
     response = site.press_confirm(site.confirm_link())
 
