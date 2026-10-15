@@ -17,7 +17,7 @@ from nano_standup.booking_api import BookingApiError, BookingDataError
 from nano_standup.booking_source import BookingSource, InstrumentNotFound
 from nano_standup.brief import build_brief
 from nano_standup.domain import PRAGUE, Clock, Instrument, Week, WorkingHours
-from nano_standup.mail import MailSender, Message
+from nano_standup.mail import MailSender, Message, RecipientRefused
 from nano_standup.sent_briefs import SentBriefStore
 from nano_standup.subscriptions import Subscription, SubscriptionStore
 
@@ -35,8 +35,9 @@ RETRY_DEADLINE = time(10, 0)
 # OSError covers all SMTP errors.
 RETRYABLE_ERRORS = (BookingApiError, OSError)
 # The failures a later try cannot fix, so the brief fails at once: the instrument is gone from the booking system,
-# or it lacks the data a brief needs. Any other, unexpected error fails at once too.
-PERMANENT_ERRORS = (InstrumentNotFound, BookingDataError)
+# it lacks the data a brief needs, or the mail server refuses the recipient address. Any other, unexpected error
+# fails at once too.
+PERMANENT_ERRORS = (InstrumentNotFound, BookingDataError, RecipientRefused)
 
 
 @dataclass(frozen=True)
@@ -265,7 +266,7 @@ def _send_error_report(mail_sender: MailSender, from_address: str, to: str, week
     )
     try:
         mail_sender.send(message)
-    except OSError as error:
+    except (OSError, RecipientRefused) as error:
         log.error("Cannot send the error report to the service admin %s: %s", to, error)
         return
     log.info("Sent the error report to the service admin %s", to)

@@ -8,7 +8,7 @@ import pytest
 from nano_standup.booking_api import BookingApiError, BookingDataError
 from nano_standup.booking_source import BookingSource, FakeBookingSource
 from nano_standup.domain import Guarantor, Instrument, Reservation, ReservationStatus, Week
-from nano_standup.mail import InMemoryMailSender, MailSender, Message
+from nano_standup.mail import InMemoryMailSender, MailSender, Message, RecipientRefused
 from nano_standup.monday_job import MondayJobResult, run_monday_job
 from nano_standup.sent_briefs import SentBriefStore
 from nano_standup.subscriptions import Subscription, SubscriptionStore
@@ -84,6 +84,19 @@ class FailingMailSender(InMemoryMailSender):
     def send(self, message: Message) -> None:
         if self._time.now < self._until:
             raise ConnectionRefusedError(111, "Connection refused")
+        super().send(message)
+
+
+class RefusingMailSender(InMemoryMailSender):
+    """Keeps the messages in memory, but the mail server refuses one recipient address."""
+
+    def __init__(self, refused: str) -> None:
+        super().__init__()
+        self._refused = refused
+
+    def send(self, message: Message) -> None:
+        if message.to == self._refused:
+            raise RecipientRefused(f"The mail server refused {message.to}: 550 5.1.1 No such user")
         super().send(message)
 
 
@@ -430,6 +443,23 @@ def test_a_mail_server_down_all_morning_logs_the_error_report_it_could_not_send(
     )
 
 
+def test_a_refused_service_admin_address_logs_the_error_report_it_could_not_send(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    database = tmp_path / "standup.sqlite3"
+    SubscriptionStore(database).add_active("instr-gone", "hana.testova@example.org", MONDAY_8AM)
+    mail_sender = RefusingMailSender("admin@example.org")
+
+    result = _run(FakeBookingSource(instruments=[]), database, mail_sender)
+
+    assert mail_sender.sent == []
+    assert len(result.failed) == 1
+    assert any(
+        r.levelno == logging.ERROR and r.getMessage().startswith("Cannot send the error report to the service admin")
+        for r in caplog.records
+    )
+
+
 def test_a_brief_sent_but_not_recorded_does_not_stop_the_others_and_is_in_the_error_report(
     tmp_path: Path,
 ) -> None:
@@ -456,6 +486,22 @@ def test_a_brief_sent_but_not_recorded_does_not_stop_the_others_and_is_in_the_er
     assert time.now == MONDAY_8AM
     assert (result.sent, result.failed) == (2, ())
     assert [f.subscription.instrument_id for f in result.not_recorded] == [INSTRUMENT.id]
+
+
+def test_a_refused_recipient_fails_at_once_and_goes_to_the_error_report(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    time = FakeTime(MONDAY_8AM)
+    mail_sender = RefusingMailSender("hana.testova@example.org")
+
+    result = _run(FakeBookingSource(instruments=[INSTRUMENT, OTHER]), database, mail_sender, time)
+
+    brief, error_report = mail_sender.sent
+    assert brief.to == "ota.zkusebni@example.org"
+    assert "TEST-SEM (instr-1) to hana.testova@example.org: " in error_report.text
+    assert "No such user" in error_report.text
+    assert time.now == MONDAY_8AM
+    assert [f.subscription.instrument_id for f in result.failed] == [INSTRUMENT.id]
 
 
 def test_an_instrument_not_in_the_booking_system_fails_at_once_without_retries(tmp_path: Path) -> None:

@@ -16,8 +16,14 @@ class Message:
     text: str
 
 
+class RecipientRefused(RuntimeError):
+    """The mail server refused the recipient address for good (a 5xx answer), so trying again does not help."""
+
+
 class MailSender(Protocol):
-    def send(self, message: Message) -> None: ...
+    def send(self, message: Message) -> None:
+        """Raises RecipientRefused when the mail server refuses the recipient for good, or OSError on other errors."""
+        ...
 
 
 class InMemoryMailSender:
@@ -56,4 +62,12 @@ class SmtpMailSender:
                 smtp.starttls()
             if settings.username:
                 smtp.login(settings.username, settings.password or "")
-            smtp.send_message(email)
+            try:
+                smtp.send_message(email)
+            except smtplib.SMTPRecipientsRefused as error:
+                answers = list(error.recipients.values())
+                # A 4xx answer, such as greylisting, may pass later, so it stays an SMTP error worth another try.
+                if all(500 <= code < 600 for code, _ in answers):
+                    detail = "; ".join(f"{code} {reply.decode(errors='replace')}" for code, reply in answers)
+                    raise RecipientRefused(f"The mail server refused {message.to}: {detail}") from error
+                raise
