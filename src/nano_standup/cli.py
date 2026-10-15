@@ -12,6 +12,7 @@ from nano_standup.booking_source import InstrumentNotFound
 from nano_standup.config import ConfigError, Settings, load_settings
 from nano_standup.mail import SmtpMailSender
 from nano_standup.monday_job import run_monday_job
+from nano_standup.sent_briefs import SentBriefStore
 from nano_standup.service_admin import NotTheGuarantor, add_subscription
 from nano_standup.subscriptions import SubscriptionStore
 
@@ -55,15 +56,17 @@ def _add_subscription(settings: Settings, instrument_id: str, email: str) -> int
 
 
 def _run_monday_job(settings: Settings) -> int:
-    sent = run_monday_job(
+    store = _store(settings)
+    result = run_monday_job(
         _booking_source(settings),
-        _store(settings),
+        store,
+        SentBriefStore(settings.database_path),
         SmtpMailSender(settings.smtp),
         clock=system_clock,
         from_address=settings.mail_from,
         working_hours=settings.working_hours,
     )
-    log.info("Monday job done: %d briefs sent", sent)
+    log.info("Monday job done: %d briefs sent, %d already sent before", result.sent, result.already_sent)
     return 0
 
 
