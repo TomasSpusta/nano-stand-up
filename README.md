@@ -53,6 +53,24 @@ The formatter and the linter share the Ruff config in `pyproject.toml`, with a l
 
 The tests run offline and use made-up data only.
 
+### Live API check
+
+One opt-in test checks the real booking source against the live booking API, to catch API changes the fake would hide.
+It only reads: it fails before sending any request other than a GET or the login.
+It checks the instrument and its guarantor, a recent week's reservations with their experiment plans, the users' certificates and past reservations, and the session filters by instrument and by user that the API spec does not list.
+Its messages hold only counts, field names, and ids, never names, emails, or the API key.
+
+`uv run pytest` leaves it out.
+It runs only with `-m live_api`, and it is skipped unless `BOOKING_API_BASE_URL`, `BOOKING_API_KEY`, and `LIVE_API_INSTRUMENT_ID` are set.
+`LIVE_API_INSTRUMENT_ID` is the id of an instrument the API key can read that had reservations in the last 12 weeks.
+Put it in `.env` or the environment, then run:
+
+```bash
+uv run --env-file .env pytest -m live_api -s
+```
+
+`-s` shows a one-line summary with counts.
+
 ## Run
 
 Start Mailpit, a local mail catcher, so no real guarantor gets mail while testing:
