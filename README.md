@@ -17,7 +17,7 @@ Copy `.env.example` to `.env` and fill it in.
 `WORKING_DAY_START` and `WORKING_DAY_END` (default 07:00 and 19:00) set the working day, Monday to Friday.
 The Heads-up section of the brief lists the reservations outside it.
 
-## Test and lint
+## Test, lint, and format
 
 ```bash
 uv run pytest
@@ -30,6 +30,20 @@ uv run mypy
 ```bash
 uv run ruff check
 ```
+
+Check that the code has the project format:
+
+```bash
+uv run ruff format --check
+```
+
+Format the code:
+
+```bash
+uv run ruff format
+```
+
+The formatter and the linter share the Ruff config in `pyproject.toml`, with a line length of 120.
 
 The tests run offline and use made-up data only.
 

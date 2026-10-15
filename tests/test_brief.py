@@ -308,7 +308,7 @@ def test_the_plain_text_version_shows_the_same_week() -> None:
 
     text = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT, WORKING_HOURS).text
 
-    assert text == """\
+    expected = """\
 Weekly brief for Hana Testova
 Test Electron Microscope
 TEST-SEM - Monday 19. 10. to Sunday 25. 10. 2026
@@ -352,6 +352,7 @@ FRIDAY 23. 10.
 Built on Monday 19. 10. 2026 at 08:00.
 Check the booking system for later changes.
 """
+    assert text == expected
 
 
 def test_the_plain_text_version_of_an_empty_week_says_so() -> None:
@@ -566,7 +567,7 @@ def test_the_heads_ups_come_first_above_the_counts() -> None:
 
     brief = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT, WORKING_HOURS)
 
-    assert """\
+    expected = """\
 TEST-SEM - Monday 19. 10. to Sunday 25. 10. 2026
 
 HEADS-UP
@@ -579,7 +580,8 @@ HEADS-UP
 2 reservations, 3 h booked, 2 users, 2 without an experiment plan, 0 cancelled
 
 MONDAY 19. 10.
-""" in brief.text
+"""
+    assert expected in brief.text
     assert "TEST-SEM - Monday 19. 10. to Sunday 25. 10. 2026 Heads-up No experiment plan" in visible_text(brief.html)
 
 
