@@ -77,14 +77,14 @@ class Reservation:
         return self.end - self.start
 
     @property
-    def will_happen(self) -> bool:
-        """Not cancelled. A requested reservation may still happen, so it counts."""
+    def is_not_cancelled(self) -> bool:
+        """Reserved or requested. A requested reservation may not happen, but it still counts."""
         return self.status is not ReservationStatus.CANCELLED
 
     @property
-    def will_happen_without_experiment_plan(self) -> bool:
-        """A cancelled reservation needs no experiment plan."""
-        return self.will_happen and not self.experiment_plan.strip()
+    def is_missing_experiment_plan(self) -> bool:
+        """Not cancelled and with no experiment plan. A cancelled reservation needs no experiment plan."""
+        return self.is_not_cancelled and not self.experiment_plan.strip()
 
 
 @dataclass(frozen=True)

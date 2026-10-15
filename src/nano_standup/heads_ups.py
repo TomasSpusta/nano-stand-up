@@ -15,16 +15,22 @@ class HeadsUpRule:
     matches: Callable[[Reservation], bool]
 
 
+# The counts use this rule too, so the heads-up and the "waiting for your approval" count always agree.
+WAITING_FOR_APPROVAL = HeadsUpRule(
+    "Waiting for your approval", lambda reservation: reservation.status is ReservationStatus.REQUESTED
+)
+
+
 def heads_up_rules(working_hours: WorkingHours) -> list[HeadsUpRule]:
     # First the reservations the guarantor has to approve, as in the counts.
     return [
-        HeadsUpRule("Waiting for your approval", lambda reservation: reservation.status is ReservationStatus.REQUESTED),
-        HeadsUpRule("No experiment plan", lambda reservation: reservation.will_happen_without_experiment_plan),
+        WAITING_FOR_APPROVAL,
+        HeadsUpRule("No experiment plan", lambda reservation: reservation.is_missing_experiment_plan),
         HeadsUpRule(
             f"Outside working hours ({working_hours.start:%H:%M} to {working_hours.end:%H:%M}, Monday to Friday)",
             # A cancelled reservation needs no safety check.
-            lambda reservation: reservation.will_happen and not working_hours.covers(reservation),
+            lambda reservation: reservation.is_not_cancelled and not working_hours.covers(reservation),
         ),
         # The guarantor can re-plan a freed slot.
-        HeadsUpRule("Cancelled", lambda reservation: not reservation.will_happen),
+        HeadsUpRule("Cancelled", lambda reservation: not reservation.is_not_cancelled),
     ]
