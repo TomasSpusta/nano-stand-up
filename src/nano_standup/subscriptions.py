@@ -266,10 +266,14 @@ CREATE TABLE subscription_v2 (
 
 
 def _upgrade_to_3(db: sqlite3.Connection) -> None:
-    """Add the confirm_link table. The statement is version 3's own, as in _upgrade_to_2."""
+    """Add the confirm_link table. The statement is version 3's own, as in _upgrade_to_2.
+
+    IF NOT EXISTS: a database made before schema versions covered confirm links may have the table already, with
+    these same columns, at version 0. It keeps its rows.
+    """
     db.execute(
         """
-CREATE TABLE confirm_link (
+CREATE TABLE IF NOT EXISTS confirm_link (
     token_hash TEXT PRIMARY KEY,
     instrument_id TEXT NOT NULL,
     email TEXT NOT NULL,

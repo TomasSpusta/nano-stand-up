@@ -1,3 +1,4 @@
+import hashlib
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -23,6 +24,18 @@ CREATE TABLE IF NOT EXISTS subscription (
     status TEXT NOT NULL CHECK (status IN ('active')),
     created_at TEXT NOT NULL,
     UNIQUE (instrument_id, email)
+)
+"""
+
+# The exact statement a database made before schema versions covered confirm links used for that table.
+_UNVERSIONED_CONFIRM_LINK_SCHEMA = """
+CREATE TABLE IF NOT EXISTS confirm_link (
+    token_hash TEXT PRIMARY KEY,
+    instrument_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    used_at TEXT
 )
 """
 
@@ -256,6 +269,32 @@ def test_a_version_2_database_gains_confirm_links_and_keeps_its_subscriptions(tm
     requested = store.request("instr-1", "hana.testova@example.org", NOW)
     assert store.confirm(requested.token, NOW) == Subscription("instr-1", "hana.testova@example.org")
     assert _status_and_end_time(database) == [("active", None), ("active", None)]
+
+
+def test_a_version_0_database_that_has_confirm_links_keeps_them(tmp_path: Path) -> None:
+    # Made before schema versions covered confirm links: the first subscription table and a confirm_link table.
+    database = tmp_path / "standup.sqlite3"
+    token = "a-token-sent-before-the-upgrade"
+    with closing(sqlite3.connect(database)) as db, db:
+        db.execute(_FIRST_SCHEMA)
+        db.execute(_UNVERSIONED_CONFIRM_LINK_SCHEMA)
+        db.execute(
+            "INSERT INTO confirm_link (token_hash, instrument_id, email, created_at, expires_at)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (
+                hashlib.sha256(token.encode()).hexdigest(),
+                SEM,
+                EMAIL,
+                NOW.isoformat(),
+                (NOW + CONFIRM_LINK_LIFETIME).isoformat(),
+            ),
+        )
+
+    store = SubscriptionStore(database)
+
+    assert _user_version(database) == 3
+    assert store.confirm(token, NOW) == Subscription(SEM, EMAIL)
+    assert store.list_active() == [Subscription(SEM, EMAIL)]
 
 
 def test_confirming_starts_an_ended_subscription_again(store: SubscriptionStore, tmp_path: Path) -> None:
