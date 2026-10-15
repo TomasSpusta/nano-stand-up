@@ -722,6 +722,44 @@ def test_a_subscriber_no_longer_the_guarantor_gets_a_stop_notice_and_no_brief(
     )
 
 
+class CountingBookingSource(FakeBookingSource):
+    """The fake booking source, but it keeps the instruments whose reservations or user facts the job read."""
+
+    def __init__(
+        self,
+        instruments: list[Instrument],
+        reservations: dict[str, list[Reservation]],
+        certificates: dict[str, dict[str, list[Certificate]]],
+    ) -> None:
+        super().__init__(instruments, reservations, certificates)
+        self.read: list[str] = []
+
+    def get_reservations(self, instrument_id: str, week: Week) -> list[Reservation]:
+        self.read.append(instrument_id)
+        return super().get_reservations(instrument_id, week)
+
+    def get_user_facts(self, instrument_id: str, user_id: str) -> UserFacts:
+        self.read.append(instrument_id)
+        return super().get_user_facts(instrument_id, user_id)
+
+
+def test_a_subscription_that_ends_reads_no_reservations_or_user_facts(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    jana = reservation("2026-10-20T09:00", "2026-10-20T11:00", user_name="Jana Smyslena")
+    source = CountingBookingSource(
+        [_with_guarantor(INSTRUMENT, "Ota Zkusebni", "ota.zkusebni@example.org"), OTHER],
+        reservations={INSTRUMENT.id: [jana], OTHER.id: [jana]},
+        certificates={INSTRUMENT.id: {JANA: [OLD_CERTIFICATE]}, OTHER.id: {JANA: [OLD_CERTIFICATE]}},
+    )
+
+    result = _run(source, database, InMemoryMailSender())
+
+    # The guarantor check comes first, so the ended subscription costs no reads for a brief.
+    assert source.read == [OTHER.id, OTHER.id]
+    assert (result.sent, result.subscriptions_ended) == (1, 1)
+
+
 def test_a_re_run_in_the_same_week_sends_no_second_stop_notice(tmp_path: Path) -> None:
     database = tmp_path / "standup.sqlite3"
     _subscribe_both(database)

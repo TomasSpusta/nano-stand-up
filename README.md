@@ -79,6 +79,7 @@ The server timer starts the Monday job once, at 08:00 Prague time.
 
 Before each brief, the job checks that the subscriber's email is still the instrument's guarantor email in the booking system, ignoring case and surrounding spaces.
 If not (the guarantor changed, or the guarantor's email changed), no brief goes out and the subscription ends.
+The job then reads no reservations, certificates, or user history for that subscription.
 The old address gets a short stop notice instead, once: an ended subscription is not checked again.
 If the stop notice cannot be sent, the subscription still ends, and the stop notice is tried again like a brief (see below).
 A stop notice to an address the mail server refuses for good is not tried again.
