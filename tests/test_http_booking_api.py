@@ -26,6 +26,30 @@ def test_logs_in_once_and_sends_list_filters_as_repeated_parameters() -> None:
     assert server.queries[0] == {"filters[]": ["a:eq:1", "b:eq:2"], "limit": ["50"]}
 
 
+def test_an_expired_token_logs_in_again_and_repeats_the_request() -> None:
+    with local_booking_server({"equip-sem": SEM}, token_uses=1) as server:
+        api = HttpBookingApi(server.url, API_KEY)
+        api.get("/api/equipment/equip-sem", {})
+
+        # The first token is used up, as when it expires during the Monday job retries.
+        second = api.get("/api/equipment/equip-sem", {})
+
+    assert second["ge_alias"] == "TEST-SEM"
+    assert server.logins == 2
+
+
+def test_a_401_after_a_fresh_login_raises_the_error() -> None:
+    with local_booking_server({"equip-sem": SEM}, token_uses=0) as server:
+        api = HttpBookingApi(server.url, API_KEY)
+
+        with pytest.raises(BookingApiError, match="/api/equipment/equip-sem failed: HTTP 401") as error:
+            api.get("/api/equipment/equip-sem", {})
+
+    assert error.value.status == 401
+    # The first login and one more, not a loop.
+    assert server.logins == 2
+
+
 def test_an_http_error_names_the_request_and_status() -> None:
     with local_booking_server({}) as server:
         api = HttpBookingApi(server.url, API_KEY)
@@ -42,6 +66,9 @@ def test_a_wrong_api_key_fails_at_login() -> None:
 
         with pytest.raises(BookingApiError, match="/api/login failed: HTTP 401"):
             api.get("/api/equipment/equip-sem", {})
+
+    # A wrong API key is not tried twice.
+    assert server.login_attempts == 1
 
 
 def test_an_unreachable_api_names_the_request() -> None:
