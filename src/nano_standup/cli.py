@@ -89,7 +89,7 @@ def _run_monday_job(settings: Settings, clock: Clock, sleep: Sleep) -> int:
             sleep=sleep,
             from_address=settings.mail_from,
             service_admin_email=settings.service_admin_email,
-            working_hours=settings.working_hours,
+            heads_up_settings=settings.heads_up,
         )
     return EXIT_BRIEFS_NOT_SENT if result.failed or result.not_recorded else 0
 

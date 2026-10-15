@@ -15,12 +15,13 @@ from datetime import datetime, time, timedelta
 from nano_standup.booking_api import BookingAccessDenied, BookingApiError, BookingDataError
 from nano_standup.booking_source import BookingSource, InstrumentNotFound
 from nano_standup.brief import build_brief
-from nano_standup.domain import PRAGUE, Clock, Instrument, Week, WorkingHours
+from nano_standup.domain import PRAGUE, Clock, Instrument, Reservation, UserFacts, Week
 from nano_standup.error_report import SendFailure, send_error_report
+from nano_standup.formatting import counted, day_month_year
+from nano_standup.heads_ups import HeadsUpSettings
 from nano_standup.mail import MailSender, Message, RecipientRefused
 from nano_standup.sent_briefs import SentBriefStore
 from nano_standup.subscriptions import Subscription, SubscriptionStore
-from nano_standup.wording import counted, day_month_year
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ def run_monday_job(
     sleep: Sleep,
     from_address: str,
     service_admin_email: str,
-    working_hours: WorkingHours,
+    heads_up_settings: HeadsUpSettings,
 ) -> MondayJobResult:
     """Send the briefs not yet sent this week, with retries. The week is the one that holds today in Prague.
 
@@ -72,7 +73,7 @@ def run_monday_job(
     started = clock().astimezone(PRAGUE)
     week = Week.containing(started.date())
     deadline = datetime.combine(started.date(), RETRY_DEADLINE, tzinfo=PRAGUE)
-    sender = _BriefSender(source, sent_briefs, mail_sender, clock, from_address, working_hours, week)
+    sender = _BriefSender(source, sent_briefs, mail_sender, clock, from_address, heads_up_settings, week)
     active = subscriptions.list_active()
     to_send = [s for s in active if not sent_briefs.was_sent(s, week)]
 
@@ -158,7 +159,7 @@ class _BriefSender:
     mail_sender: MailSender
     clock: Clock
     from_address: str
-    working_hours: WorkingHours
+    heads_up_settings: HeadsUpSettings
     week: Week
 
     def try_each(self, subscriptions: list[Subscription], outcome: _Outcome) -> list[SendFailure]:
@@ -197,9 +198,10 @@ class _BriefSender:
         Raises _NotRecorded when the brief went out but the record of sent briefs could not save it.
         """
         reservations = self.source.get_reservations(instrument.id, self.week)
+        user_facts = _user_facts(self.source, instrument.id, reservations)
         # Built now, not at the start of the run, so a late brief shows when it was really built.
         brief = build_brief(
-            instrument, self.week, reservations, built_at=self.clock(), working_hours=self.working_hours
+            instrument, self.week, reservations, user_facts, built_at=self.clock(), settings=self.heads_up_settings
         )
         # Checked again just before sending: another run may have sent it since this run started.
         if self.sent_briefs.was_sent(subscription, self.week):
@@ -230,3 +232,13 @@ class _BriefSender:
 
 class _NotRecorded(Exception):
     """The brief went out, but the record of sent briefs could not save it. The cause holds the database error."""
+
+
+def _user_facts(source: BookingSource, instrument_id: str, reservations: list[Reservation]) -> dict[str, UserFacts]:
+    """Facts about each user of the week's reservations, by user id.
+
+    Cancelled reservations need none: no heads-up rule about users looks at them.
+    A reservation without a user id gets none either; the brief then treats its user as having no certificate.
+    """
+    user_ids = sorted({r.user_id for r in reservations if not r.is_cancelled and r.user_id})
+    return {user_id: source.get_user_facts(instrument_id, user_id) for user_id in user_ids}

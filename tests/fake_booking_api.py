@@ -13,6 +13,8 @@ from nano_standup.booking_api import (
     Params,
 )
 
+# Session filters the real API takes, though its spec does not list them.
+REFERENCE_FILTERS = frozenset({"ge_equipmentid", "ge_realised_for_contactid"})
 MAX_PAGE_SIZE = 50  # The real API fails with a server error on larger pages when it expands activity parties.
 # The real API fails with a server error on some pages of the reservation list when it expands the user.
 # It works on a single reservation.
@@ -26,6 +28,12 @@ class FakeBookingApi:
         self.instruments: dict[str, dict[str, Any]] = {}  # Any: mirrors the API's JSON.
         self.reservations: list[dict[str, Any]] = []  # Any: mirrors the API's JSON.
         self.recordings: list[dict[str, Any]] = []  # Any: mirrors the API's JSON.
+        # By contact id. A contact links to the user's system user, which holds the certificates.
+        self.contacts: dict[str, dict[str, Any]] = {}  # Any: mirrors the API's JSON.
+        # By (system user id, instrument id).
+        self.certificates: dict[tuple[str, str], list[dict[str, Any]]] = {}  # Any: mirrors the API's JSON.
+        # A session links a reservation to its instrument and user.
+        self.sessions: list[dict[str, Any]] = []  # Any: mirrors the API's JSON.
         # How many recordings the pages of /api/recording held, to check that reads stay small.
         self.recordings_read = 0
         # Instrument ids the API key has no access to.
@@ -50,6 +58,24 @@ class FakeBookingApi:
                 if item["id"] == reservation_id:
                     return {k: v for k, v in item.items() if k != "activity_parties"}
             raise BookingApiError(path, 404, "Not Found")
+        if path.startswith("/api/contact/"):
+            item = self.contacts.get(path.removeprefix("/api/contact/"))
+            if item is None:
+                raise BookingApiError(path, 404, "Not Found")
+            return item
+        if path.startswith("/api/system-user/") and path.endswith("/certificates"):
+            # /api/system-user/{id}/equipment/{equipmentId}/certificates
+            _, _, _, system_user_id, _, instrument_id, _ = path.split("/")
+            # The real endpoint ignores page and limit: it always gives the whole list.
+            # So a client that reads page after page until an empty one never stops.
+            if int(str(params.get("page", 1))) > 1:
+                raise AssertionError(f"{path} ignores page in the real API; reading page 2 would never end")
+            return self.certificates.get((system_user_id, instrument_id), [])
+        if path == "/api/session":
+            page = self._page(path, self.sessions, params, set(), REFERENCE_FILTERS)
+            if "ge_serviceappointmentid" in str(params.get("scope", "")).split(","):
+                return page
+            return [{**x, "ge_serviceappointmentid": {"id": x["ge_serviceappointmentid"]["id"]}} for x in page]
         if path == "/api/recording":
             page = self._page(path, self.recordings, params, {"new_start"})
             self.recordings_read += len(page)
@@ -62,6 +88,7 @@ class FakeBookingApi:
         items: list[dict[str, Any]],  # Any: mirrors the API's JSON.
         params: Params,
         time_fields: set[str],
+        reference_fields: frozenset[str] = frozenset(),
     ) -> list[dict[str, Any]]:  # Any: mirrors the API's JSON.
         limit = int(str(params.get("limit", 20)))
         if limit > MAX_PAGE_SIZE:
@@ -69,13 +96,23 @@ class FakeBookingApi:
         page = int(str(params.get("page", 1)))
         filters = params.get("filters[]", [])
         filter_list = filters if isinstance(filters, list) else [str(filters)]
-        matching = [x for x in items if _matches(x, filter_list, time_fields)]
+        matching = [x for x in items if _matches(x, filter_list, time_fields, reference_fields)]
         return matching[(page - 1) * limit : page * limit]
 
 
-def _matches(item: dict[str, Any], filters: list[str], time_fields: set[str]) -> bool:  # Any: mirrors the API's JSON.
+def _matches(
+    item: dict[str, Any],  # Any: mirrors the API's JSON.
+    filters: list[str],
+    time_fields: set[str],
+    reference_fields: frozenset[str],
+) -> bool:
+    """`time_fields` take gt and lt. `reference_fields` take eq, on the id of the record they point to."""
     for f in filters:
         column, operator, value = f.split(":", 2)
+        if column in reference_fields and operator == "eq":
+            if (item.get(column) or {}).get("id") != value:
+                return False
+            continue
         if column not in time_fields:
             raise AssertionError(f"FakeBookingApi does not support filter {f!r}")
         # A row with no value in the column never matches a lt or gt filter.
@@ -107,6 +144,7 @@ def guarantor_json(firstname: str, lastname: str, email: str | None) -> dict[str
         "lastname": lastname,
         "fullname": f"{lastname}, {firstname}",
         "internalemailaddress": email,
+        "ge_contactid": {"id": f"contact-{firstname}-{lastname}"},
     }
 
 
@@ -170,4 +208,23 @@ def recording(
         "new_start": start,
         "new_plan_experimentu_new": experiment_plan,
         "ge_sessionid": session,
+    }
+
+
+def contact_json(contact_id: str, system_user_id: str | None) -> dict[str, Any]:  # Any: mirrors the API's JSON.
+    return {"id": contact_id, "ge_systemuserid": {"id": system_user_id} if system_user_id else None}
+
+
+def certificate_json(valid_from: str | None, valid_to: str | None) -> dict[str, Any]:  # Any: mirrors the API's JSON.
+    """Dates as the real API gives them, such as "2026-05-31T00:00:00"."""
+    return {"id": f"cert-{valid_from}", "ge_platnostod": valid_from, "ge_platnostdo": valid_to, "statecode": 0}
+
+
+def session_json(reservation: dict[str, Any], instrument_id: str) -> dict[str, Any]:  # Any: mirrors the API's JSON.
+    """The session of a reservation made with `reservation_json`."""
+    return {
+        "id": f"session-{reservation['id']}",
+        "ge_equipmentid": {"id": instrument_id},
+        "ge_realised_for_contactid": {"id": reservation["ge_realised_for_contactid"]["id"]},
+        "ge_serviceappointmentid": {k: v for k, v in reservation.items() if k != "activity_parties"},
     }
