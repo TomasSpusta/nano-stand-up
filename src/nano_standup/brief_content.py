@@ -135,7 +135,7 @@ def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
     hours = sum(week.time_inside(r).total_seconds() for r in active) / 3600
     # Reservations with no user id still count each user name once.
     users = len({r.user_id or r.user_name for r in active})
-    without_experiment_plan = sum(1 for r in active if not r.experiment_plan.strip())
+    without_experiment_plan = sum(1 for r in reservations if r.lacks_experiment_plan)
     # Shown only when there is something to approve, and first, because it asks the guarantor to act.
     waiting = [Count(str(requested), "waiting for your approval", needs_action=True)] if requested else []
     return waiting + [

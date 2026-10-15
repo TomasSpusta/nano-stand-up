@@ -94,3 +94,28 @@ def test_a_brief_shows_cancelled_and_overnight_reservations_in_both_versions(tmp
     assert "09:00 to 10:00 1 h Cancelled Karel Neexistujici" in html_text
     assert "15:00 to Wed 13:00 (22 h)" in message.text
     assert "[Cancelled] 09:00 to 10:00 (1 h)" in message.text
+
+
+def test_a_brief_points_out_heads_ups_in_both_versions(tmp_path: Path) -> None:
+    source = FakeBookingSource(
+        instruments=[INSTRUMENT],
+        reservations={
+            INSTRUMENT.id: [
+                reservation("2026-10-20T09:00", "2026-10-20T11:00", user_name="Karel Neexistujici"),
+                reservation("2026-10-21T18:00", "2026-10-21T21:00", user_name="Jana Smyslena", experiment_plan=""),
+            ],
+        },
+    )
+    store = SubscriptionStore(tmp_path / "standup.sqlite3")
+    store.add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    mail_sender = InMemoryMailSender()
+
+    run_monday_job(source, store, mail_sender, clock=lambda: MONDAY_8AM, from_address="standup@example.org")
+
+    [message] = mail_sender.sent
+    assert (
+        "Heads-up No experiment plan Wed 21. 10. 18:00 to 21:00, Jana Smyslena "
+        "Outside working hours (07:00 to 19:00, Monday to Friday) Wed 21. 10. 18:00 to 21:00, Jana Smyslena"
+    ) in visible_text(message.html)
+    assert "HEADS-UP\n  No experiment plan\n    Wed 21. 10. 18:00 to 21:00, Jana Smyslena\n" in message.text
+    assert "Karel Neexistujici" not in message.text.split("MONDAY")[0]

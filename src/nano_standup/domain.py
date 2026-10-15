@@ -76,6 +76,11 @@ class Reservation:
     def duration(self) -> timedelta:
         return self.end - self.start
 
+    @property
+    def lacks_experiment_plan(self) -> bool:
+        """A cancelled reservation will not happen, so it needs no experiment plan."""
+        return self.status is not ReservationStatus.CANCELLED and not self.experiment_plan.strip()
+
 
 @dataclass(frozen=True)
 class Week:

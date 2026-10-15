@@ -15,14 +15,15 @@ WORKING_DAY_END = time(19, 0)
 
 
 @dataclass(frozen=True)
+class HeadsUpRule:
+    title: str
+    matches: Callable[[Reservation], bool]
+
+
+@dataclass(frozen=True)
 class HeadsUpMatch:
     title: str
     reservations: list[Reservation]
-
-
-def _without_experiment_plan(reservation: Reservation) -> bool:
-    """A cancelled reservation will not happen, so it needs no experiment plan."""
-    return reservation.status is not ReservationStatus.CANCELLED and not reservation.experiment_plan.strip()
 
 
 def _outside_working_hours(reservation: Reservation) -> bool:
@@ -40,19 +41,19 @@ def _outside_working_hours(reservation: Reservation) -> bool:
 
 
 # First the reservations the guarantor has to approve, as in the counts.
-RULES: list[tuple[str, Callable[[Reservation], bool]]] = [
-    ("Waiting for your approval", lambda reservation: reservation.status is ReservationStatus.REQUESTED),
-    ("No experiment plan", _without_experiment_plan),
-    (
+RULES = [
+    HeadsUpRule("Waiting for your approval", lambda reservation: reservation.status is ReservationStatus.REQUESTED),
+    HeadsUpRule("No experiment plan", lambda reservation: reservation.lacks_experiment_plan),
+    HeadsUpRule(
         f"Outside working hours ({WORKING_DAY_START:%H:%M} to {WORKING_DAY_END:%H:%M}, Monday to Friday)",
         _outside_working_hours,
     ),
     # The guarantor can re-plan a freed slot.
-    ("Cancelled", lambda reservation: reservation.status is ReservationStatus.CANCELLED),
+    HeadsUpRule("Cancelled", lambda reservation: reservation.status is ReservationStatus.CANCELLED),
 ]
 
 
 def heads_ups(reservations: list[Reservation]) -> list[HeadsUpMatch]:
     """The rules that match, in a fixed order, each with its reservations in the order given."""
-    matches = [HeadsUpMatch(title, [r for r in reservations if rule(r)]) for title, rule in RULES]
+    matches = [HeadsUpMatch(rule.title, [r for r in reservations if rule.matches(r)]) for rule in RULES]
     return [match for match in matches if match.reservations]
