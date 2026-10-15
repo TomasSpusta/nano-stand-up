@@ -30,8 +30,8 @@ It ends when that person is no longer the instrument's guarantor: the Monday job
 _Avoid_: Sign-up, registration, newsletter
 
 **Stop notice**:
-The short email a subscriber gets instead of the brief when their subscription ends because the booking system no longer lists their email as the instrument's guarantor.
-It says why the brief stopped and that they can sign up again if they are still the guarantor.
+The short email the guarantor whose subscription ended gets instead of the brief, when the booking system no longer lists their email as the instrument's guarantor.
+It says why the brief stopped and that they can subscribe again if they are still the guarantor.
 It never shows reservations or who the guarantor is now.
 _Avoid_: Note, notification, goodbye mail
 

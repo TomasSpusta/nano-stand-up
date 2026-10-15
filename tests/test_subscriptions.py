@@ -7,9 +7,9 @@ from nano_standup.subscriptions import Subscription, SubscriptionStore
 
 NOW = datetime(2026, 10, 19, 6, 0, tzinfo=UTC)
 
-# The subscription table before a subscription could end, as an older version created it.
+# The exact statement the first version (origin/main before ended subscriptions) used to create the table.
 _FIRST_SCHEMA = """
-CREATE TABLE subscription (
+CREATE TABLE IF NOT EXISTS subscription (
     id INTEGER PRIMARY KEY,
     instrument_id TEXT NOT NULL,
     email TEXT NOT NULL,
@@ -64,13 +64,27 @@ def test_a_database_from_before_ended_subscriptions_is_upgraded_and_keeps_its_su
         (1, "instr-1", "ended", "2026-10-01T06:00:00+00:00", "2026-10-19T06:00:00+00:00"),
         (2, "instr-2", "active", "2026-10-02T06:00:00+00:00", None),
     ]
-    # The upgraded table is the same as a new one, so opening the database again does not upgrade it again.
-    SubscriptionStore(tmp_path / "new.sqlite3")
-    assert _table_sql(database) == _table_sql(tmp_path / "new.sqlite3")
-    assert SubscriptionStore(database).list_active() == [Subscription("instr-2", "ota.zkusebni@example.org")]
+    assert _user_version(database) == _user_version(_new_database(tmp_path)) == 2
 
 
-def _table_sql(database: Path) -> str:
+def test_opening_an_up_to_date_database_needs_no_write_lock(tmp_path: Path) -> None:
+    database = _new_database(tmp_path)
+    with closing(sqlite3.connect(database, timeout=0)) as other:
+        # Another process holds the write lock, as the Monday job does while it records a sent brief.
+        other.execute("BEGIN IMMEDIATE")
+        store = SubscriptionStore(database)
+        other.rollback()
+
+    assert store.list_active() == []
+
+
+def _new_database(tmp_path: Path) -> Path:
+    database = tmp_path / "new.sqlite3"
+    SubscriptionStore(database)
+    return database
+
+
+def _user_version(database: Path) -> int:
     with closing(sqlite3.connect(database)) as db:
-        [sql] = db.execute("SELECT sql FROM sqlite_master WHERE name = 'subscription'").fetchone()
-    return str(sql)
+        [version] = db.execute("PRAGMA user_version").fetchone()
+    return int(version)

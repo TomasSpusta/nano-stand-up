@@ -8,16 +8,19 @@ from pathlib import Path
 
 from nano_standup.domain import normalize_email
 
+# The schema version, kept in SQLite's `user_version` of the database file.
+# Below 2: no table yet, or the first version's table, which allows only active subscriptions.
+# 2: a subscription can end, and keeps the time it ended.
+SCHEMA_VERSION = 2
+
 
 def _table_schema(name: str) -> str:
-    """The subscription table as this version wants it. A new column must allow NULL or have a default,
-    so the rows of an older table fit when it is upgraded.
+    """The subscription table of SCHEMA_VERSION.
 
     An ended subscription stays as a row, so the Monday job never checks or ends it twice.
     """
-    # The name is in quotes because SQLite stores a renamed table that way, so a new and an upgraded table match.
     return f"""
-CREATE TABLE "{name}" (
+CREATE TABLE {name} (
     id INTEGER PRIMARY KEY,
     instrument_id TEXT NOT NULL,
     email TEXT NOT NULL,
@@ -79,24 +82,37 @@ class SubscriptionStore:
 def _create_or_upgrade_table(db: sqlite3.Connection) -> None:
     """Create the subscription table, or upgrade one an older version created, keeping its rows.
 
-    SQLite cannot change a column or a CHECK in place, so an older table is copied into a new one and replaced.
+    Takes the write lock only when there is something to do.
     """
+    if _version(db) >= SCHEMA_VERSION:
+        return
     # One transaction: the upgrade happens fully or not at all, and two processes never upgrade at once.
     db.execute("BEGIN IMMEDIATE")
-    row = db.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'subscription'").fetchone()
-    if row is None:
+    # Read again under the lock: another process may have upgraded it meanwhile.
+    if _version(db) >= SCHEMA_VERSION:
+        return
+    table = db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'subscription'").fetchone()
+    if table is None:
         db.execute(_table_schema("subscription"))
-        return
-    if _same_sql(row[0], _table_schema("subscription")):
-        return
-    db.execute(_table_schema("subscription_upgrade"))
-    new_columns = {column for _, column, *_ in db.execute("PRAGMA table_info(subscription_upgrade)")}
-    kept = ", ".join(column for _, column, *_ in db.execute("PRAGMA table_info(subscription)") if column in new_columns)
-    db.execute(f"INSERT INTO subscription_upgrade ({kept}) SELECT {kept} FROM subscription")
+    else:
+        _upgrade_to_2(db)
+    db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+def _upgrade_to_2(db: sqlite3.Connection) -> None:
+    """Allow the 'ended' status and add `ended_at`.
+
+    SQLite cannot change a CHECK in place, so the rows are copied into a new table that replaces the old one.
+    """
+    db.execute(_table_schema("subscription_v2"))
+    db.execute(
+        "INSERT INTO subscription_v2 (id, instrument_id, email, status, created_at)"
+        " SELECT id, instrument_id, email, status, created_at FROM subscription"
+    )
     db.execute("DROP TABLE subscription")
-    db.execute("ALTER TABLE subscription_upgrade RENAME TO subscription")
+    db.execute("ALTER TABLE subscription_v2 RENAME TO subscription")
 
 
-def _same_sql(stored: str, wanted: str) -> bool:
-    """SQLite keeps the CREATE statement as it was written, so compare it with whitespace collapsed."""
-    return stored.split() == wanted.split()
+def _version(db: sqlite3.Connection) -> int:
+    [version] = db.execute("PRAGMA user_version").fetchone()
+    return int(version)

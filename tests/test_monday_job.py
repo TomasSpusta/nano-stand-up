@@ -572,7 +572,7 @@ def test_a_subscriber_no_longer_the_guarantor_gets_a_stop_notice_and_no_brief(
     assert notice.subject == "Your brief for TEST-SEM has stopped"
     for version in (notice.text, visible_text(notice.html)):
         assert "no longer lists this email address as the guarantor of TEST-SEM" in version
-        assert "sign up again" in version
+        assert "subscribe again" in version
         # The stop notice never shows the reservations or who the guarantor is now.
         assert "Jana Smyslena" not in version
         assert name not in version
@@ -650,7 +650,9 @@ class EndedByAnotherRunMeanwhile(FakeBookingSource):
         return super().get_instrument(instrument_id)
 
 
-def test_a_subscription_another_run_ended_meanwhile_gets_no_second_stop_notice(tmp_path: Path) -> None:
+def test_a_subscription_another_run_ended_meanwhile_gets_no_second_stop_notice(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     database = tmp_path / "standup.sqlite3"
     _subscribe_both(database)
     source = EndedByAnotherRunMeanwhile(
@@ -659,8 +661,48 @@ def test_a_subscription_another_run_ended_meanwhile_gets_no_second_stop_notice(t
         Subscription(INSTRUMENT.id, "hana.testova@example.org"),
     )
     mail_sender = InMemoryMailSender()
+    caplog.set_level(logging.INFO, logger="nano_standup")
 
     result = _run(source, database, mail_sender)
 
     assert [m.to for m in mail_sender.sent] == ["ota.zkusebni@example.org"]
-    assert (result.sent, result.ended, result.stop_notices_not_sent) == (1, 1, ())
+    # This run did not end it, so it does not count it as ended.
+    assert (result.sent, result.ended, result.stop_notices_not_sent) == (1, 0, ())
+    assert any(
+        "1 brief sent," in r.getMessage() and "0 subscriptions ended because the guarantor changed" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+class BrokenMailSender(InMemoryMailSender):
+    """Keeps the messages in memory, but sending to one address raises an unexpected error."""
+
+    def __init__(self, broken_to: str) -> None:
+        super().__init__()
+        self._broken_to = broken_to
+
+    def send(self, message: Message) -> None:
+        if message.to == self._broken_to:
+            raise RuntimeError("Unexpected bug in the mail sender")
+        super().send(message)
+
+
+def test_an_unexpected_error_sending_a_stop_notice_does_not_stop_the_run(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    source = FakeBookingSource(
+        instruments=[_with_guarantor(INSTRUMENT, "Ota Zkusebni", "ota.zkusebni@example.org"), OTHER]
+    )
+    mail_sender = BrokenMailSender(broken_to="hana.testova@example.org")
+
+    result = _run(source, database, mail_sender)
+
+    brief, error_report = mail_sender.sent
+    assert brief.to == "ota.zkusebni@example.org"
+    assert error_report.subject == "Nano Stand-up: 1 stop notice not sent for the week of 19. 10. 2026"
+    assert (
+        "TEST-SEM (instr-1) to hana.testova@example.org: RuntimeError: Unexpected bug in the mail sender"
+        in error_report.text
+    )
+    assert SubscriptionStore(database).list_active() == [Subscription(OTHER.id, "ota.zkusebni@example.org")]
+    assert (result.sent, result.ended, result.failed) == (1, 1, ())

@@ -79,6 +79,7 @@ If not (the guarantor changed, or the guarantor's email changed), no brief goes 
 The old address gets a short stop notice instead, once: an ended subscription is not checked again.
 If the stop notice cannot be sent, the subscription still ends, the stop notice is not tried again, and it is listed in the error report.
 The log names each ended subscription by instrument and old address.
+If the booking system has no guarantor email for an instrument, its brief fails each week and shows in the service admin error report, and the subscription is not ended.
 The database keeps ended subscriptions.
 A database file from an older version is upgraded the first time this version opens it, and it keeps its subscriptions.
 

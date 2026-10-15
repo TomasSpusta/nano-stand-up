@@ -19,7 +19,7 @@ def stop_notice(subscription: Subscription, instrument: Instrument, from_address
         f"You no longer get the weekly brief for {instrument.alias}.",
         f"The booking system no longer lists this email address as the guarantor of {instrument.alias},"
         " so your subscription has ended.",
-        "If you are still the guarantor, sign up again with the email address the booking system has for you.",
+        "If you are still the guarantor, subscribe again with the email address the booking system has for you.",
     ]
     return Message(
         from_address=from_address,
