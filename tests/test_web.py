@@ -10,7 +10,7 @@ from nano_standup.booking_api import BookingApiError
 from nano_standup.booking_source import BookingSource, FakeBookingSource
 from nano_standup.domain import Guarantor, Instrument, InstrumentName, Reservation, Week
 from nano_standup.mail import InMemoryMailSender, MailSender, Message
-from nano_standup.subscription_request import CONFIRM_MAIL_GAP
+from nano_standup.subscription_request import CONFIRM_MAIL_GAP, SubscriptionRequests
 from nano_standup.subscriptions import CONFIRM_LINK_LIFETIME, Subscription, SubscriptionStore
 from nano_standup.web import create_app
 
@@ -46,15 +46,15 @@ class Site:
         self.store = SubscriptionStore(tmp_path / "standup.sqlite3")
         self.mail = InMemoryMailSender()
         self.clock = Clock()
-        app = create_app(
+        requests = SubscriptionRequests(
             source=source or FakeBookingSource([INSTRUMENT, OTHER]),
             store=self.store,
             mail_sender=mail_sender or self.mail,
             clock=self.clock,
             from_address=FROM,
-            public_base_url=BASE_URL + "/",
+            public_base_url=BASE_URL,
         )
-        self.client = TestClient(app)
+        self.client = TestClient(create_app(requests))
 
     def subscribe(self, instrument_id: str, email: str) -> str:
         response = self.client.post("/", data={"instrument_id": instrument_id, "email": email})
