@@ -3,14 +3,14 @@ that tells a former subscriber why their brief stopped."""
 
 from html import escape
 
-from nano_standup.domain import Instrument, normalize_email
+from nano_standup.domain import Instrument
 from nano_standup.mail import Message
 from nano_standup.subscriptions import Subscription
 
 
 def is_still_guarantor(subscription: Subscription, instrument: Instrument) -> bool:
     """True when the booking system still has the subscriber's email as the instrument's guarantor email."""
-    return normalize_email(subscription.email) == normalize_email(instrument.guarantor.email)
+    return instrument.has_guarantor_email(subscription.email)
 
 
 def stop_notice(subscription: Subscription, instrument: Instrument, from_address: str) -> Message:

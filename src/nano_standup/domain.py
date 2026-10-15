@@ -43,6 +43,31 @@ class Instrument:
         """Alias and id, for log and error messages."""
         return f"{self.alias} ({self.id})"
 
+    def has_guarantor_email(self, email: str) -> bool:
+        """True when `email` is the guarantor email, ignoring case and surrounding spaces. Names are never compared."""
+        return normalize_email(email) == normalize_email(self.guarantor.email)
+
+
+class NotTheGuarantor(ValueError):
+    pass
+
+
+def require_guarantor(instrument: Instrument, email: str) -> None:
+    """Raise NotTheGuarantor unless `email` is the instrument's guarantor email."""
+    if not instrument.has_guarantor_email(email):
+        raise NotTheGuarantor(
+            f"{email.strip()!r} is not the guarantor email of {instrument.label} in the booking system"
+        )
+
+
+@dataclass(frozen=True)
+class InstrumentName:
+    """An instrument's id and names, without its guarantor. Enough to pick it from a list."""
+
+    id: str
+    name: str
+    alias: str
+
 
 class ReservationStatus(Enum):
     RESERVED = "reserved"

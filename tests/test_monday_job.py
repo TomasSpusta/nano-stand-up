@@ -9,7 +9,16 @@ import pytest
 
 from nano_standup.booking_api import BookingAccessDenied, BookingApiError, BookingDataError
 from nano_standup.booking_source import BookingSource, FakeBookingSource
-from nano_standup.domain import Certificate, Guarantor, Instrument, Reservation, ReservationStatus, UserFacts, Week
+from nano_standup.domain import (
+    Certificate,
+    Guarantor,
+    Instrument,
+    InstrumentName,
+    Reservation,
+    ReservationStatus,
+    UserFacts,
+    Week,
+)
 from nano_standup.mail import InMemoryMailSender, MailSender, Message, RecipientRefused
 from nano_standup.monday_job import MondayJobResult, run_monday_job
 from nano_standup.sent_briefs import SentBriefStore
@@ -77,6 +86,9 @@ class FailingBookingSource:
             self.failed_at.append(self._time.now)
             self._time.now += self._takes
             raise BookingApiError(f"/api/equipment/{instrument_id}", 503, "Service Unavailable")
+
+    def list_subscribable_instruments(self) -> list[InstrumentName]:
+        return self._source.list_subscribable_instruments()
 
     def get_instrument(self, instrument_id: str) -> Instrument:
         self._check(instrument_id)
@@ -597,6 +609,9 @@ class BrokenBookingSource:
         self._source = source
         self._broken = broken
         self._error = error
+
+    def list_subscribable_instruments(self) -> list[InstrumentName]:
+        return self._source.list_subscribable_instruments()
 
     def get_instrument(self, instrument_id: str) -> Instrument:
         return self._source.get_instrument(instrument_id)

@@ -3,7 +3,11 @@ name = "nano-standup"
 version = "0.1.0"
 description = "Weekly briefs for CF nano instrument guarantors."
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "fastapi>=0.143.1",
+    "python-multipart>=0.0.32",
+    "uvicorn>=0.54.0",
+]
 
 [project.scripts]
 nano-standup = "nano_standup.cli:main"
@@ -27,6 +31,7 @@ mypy_path = "tests"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28.1",
     "mypy>=2.4.0",
     "pytest>=9.1.1",
     "ruff>=0.17.0",

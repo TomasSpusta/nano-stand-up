@@ -7,7 +7,18 @@ API quirks it hides:
 - Expanding activity parties fails on large pages, so it reads pages of 50.
 - Expanding the user on the reservation list fails on some pages, so it loads each matching reservation on its own.
 - The experiment plan is on a recording, which points to a session, which points to the reservation.
-- Filters know only gt and lt, not "greater or equal".
+- Filters know eq, gt and lt, but not "greater or equal".
+- The booking resource list (`/api/equipment`) holds every core facility's booking resources, about 1400 items,
+  and reading it all takes about 40 s.
+  Filters on the server cut it to the CF nano instruments in use, about 200, in about 5 s:
+  - CF nano: the booking resource's core facility (`ge_corefacilityid`) is the record named CEITECNANO.
+    The filter `ge_corefacilityid.name:eq:CEITECNANO` works, though the API spec does not list it.
+  - In use: not retired (`ge_vyrazen`, "vyřazen"). An out-of-order instrument (`ge_status` 2 or 3) is still in use.
+  - Not a person: most CF nano booking resources (about 1100) are people. No field says so, but every one of them
+    is hidden from the planning board (`ge_donotshowinplanningboard`), and the instruments are not.
+    The few other hidden items are test records and lab items no one books.
+  - True and false filter as 1 and 0, and a null matches neither.
+- A missing link to another record can come as an empty list instead of null.
 - A user's certificates hang on their system user, which their contact (the reservation's user) links to.
   Their endpoint ignores page and limit and always gives the whole list, so it is read once, not page by page.
 - Sessions can be filtered by instrument and by user, though the API spec does not list these filters.
@@ -26,7 +37,16 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from nano_standup.booking_source import InstrumentNotFound
-from nano_standup.domain import Certificate, Guarantor, Instrument, Reservation, ReservationStatus, UserFacts, Week
+from nano_standup.domain import (
+    Certificate,
+    Guarantor,
+    Instrument,
+    InstrumentName,
+    Reservation,
+    ReservationStatus,
+    UserFacts,
+    Week,
+)
 
 log = logging.getLogger(__name__)
 
@@ -39,6 +59,15 @@ PAGE_SIZE = 50
 RESERVED_STATE, RESERVED_STATUS = 3, 4
 REQUESTED_STATE, REQUESTED_STATUS = 0, 1
 CANCELLED_STATE, CANCELLED_STATUS = 2, 9
+# The name of the CF nano core facility record, which CF nano booking resources link to.
+CF_NANO_NAME = "CEITECNANO"
+SUBSCRIBABLE_INSTRUMENT_FILTERS = [
+    f"ge_corefacilityid.name:eq:{CF_NANO_NAME}",
+    # Not retired.
+    "ge_vyrazen:eq:0",
+    # Shown on the planning board, which leaves out the booking resources that are people.
+    "ge_donotshowinplanningboard:eq:0",
+]
 # How filters write a time: Prague local time without a time zone.
 API_TIME = "%Y-%m-%dT%H:%M:%S"
 # A recording starts about when its reservation does. One day of margin each side is enough to find it.
@@ -128,6 +157,16 @@ class ApiBookingSource:
     def __init__(self, api: BookingApi) -> None:
         self._api = api
 
+    def list_subscribable_instruments(self) -> list[InstrumentName]:
+        instruments = [
+            _instrument_name(item)
+            for item in self._pages("/api/equipment", SUBSCRIBABLE_INSTRUMENT_FILTERS, scope="ge_corefacilityid")
+            # The server filter already does this. Checked again because the API spec does not list that filter,
+            # so a server that starts to ignore it cannot let in another facility's booking resources.
+            if (_link(item, "ge_corefacilityid") or {}).get("name") == CF_NANO_NAME
+        ]
+        return sorted(instruments, key=lambda i: i.alias.casefold())
+
     def get_instrument(self, instrument_id: str) -> Instrument:
         path = f"/api/equipment/{urllib.parse.quote(instrument_id)}"
         try:
@@ -156,7 +195,7 @@ class ApiBookingSource:
             )
         return Instrument(
             id=_required(item, "id", f"Instrument {alias} ({instrument_id})"),
-            name=item.get("ge_nameen") or item.get("name") or alias,
+            name=_english_or_czech_name(item),
             alias=alias,
             guarantor=Guarantor(
                 name=_person_name(guarantor_json) or guarantor_json.get("fullname") or "", email=email, user_id=user_id
@@ -264,6 +303,24 @@ def _overlap_filters(week: Week) -> list[str]:
 def _time_window(field: str, start: datetime, end: datetime) -> list[str]:
     """From start (included) to end (left out). The API has no "greater or equal", so start goes back one second."""
     return [f"{field}:gt:{start - timedelta(seconds=1):{API_TIME}}", f"{field}:lt:{end:{API_TIME}}"]
+
+
+def _instrument_name(item: dict[str, Any]) -> InstrumentName:  # Any: parsed JSON.
+    alias = item.get("ge_alias") or ""
+    return InstrumentName(
+        id=_required(item, "id", f"Instrument {alias}"), name=_english_or_czech_name(item), alias=alias
+    )
+
+
+def _english_or_czech_name(item: dict[str, Any]) -> str:  # Any: parsed JSON.
+    """The English name when there is one, the Czech name otherwise, and the alias as a last resort."""
+    return str(item.get("ge_nameen") or item.get("name") or item.get("ge_alias") or "")
+
+
+def _link(item: dict[str, Any], key: str) -> dict[str, Any] | None:  # Any: parsed JSON.
+    """The linked record, or None when there is none. The API gives a missing link as null or as an empty list."""
+    value = item.get(key)
+    return value if isinstance(value, dict) else None
 
 
 def _reservation(item: dict[str, Any]) -> Reservation:  # Any: parsed JSON.
