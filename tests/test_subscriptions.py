@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from nano_standup.subscriptions import CONFIRM_LINK_LIFETIME, ConfirmOutcome, Subscription, SubscriptionStore
+from nano_standup.subscriptions import (
+    CONFIRM_LINK_LIFETIME,
+    ConfirmOutcome,
+    Subscription,
+    SubscriptionStore,
+    UnsubscribeOutcome,
+)
 
 NOW = datetime(2026, 10, 14, 10, 0, tzinfo=UTC)
 SEM = "equip-sem"
@@ -161,3 +167,86 @@ def test_an_expired_request_is_not_recent(tmp_path: Path) -> None:
     store.request(SEM, EMAIL, NOW)
 
     assert not store.has_recent_request(SEM, since=NOW - timedelta(minutes=5), now=NOW + timedelta(minutes=2))
+
+
+# Unsubscribe
+
+
+def test_unsubscribing_ends_only_that_subscription(store: SubscriptionStore) -> None:
+    sem = store.add_active(SEM, EMAIL, NOW)
+    store.add_active(LAB, EMAIL, NOW)
+    store.add_active(SEM, "ota.zkusebni@example.org", NOW)
+    token = store.unsubscribe_token(sem, NOW)
+
+    result = store.unsubscribe(token, NOW)
+
+    assert result.outcome is UnsubscribeOutcome.UNSUBSCRIBED
+    assert result.subscription == sem
+    assert store.list_active() == [Subscription(LAB, EMAIL), Subscription(SEM, "ota.zkusebni@example.org")]
+
+
+def test_unsubscribing_again_says_already_unsubscribed(store: SubscriptionStore) -> None:
+    token = store.unsubscribe_token(store.add_active(SEM, EMAIL, NOW), NOW)
+    store.unsubscribe(token, NOW)
+
+    result = store.unsubscribe(token, NOW)
+
+    assert result.outcome is UnsubscribeOutcome.ALREADY_UNSUBSCRIBED
+    assert result.subscription is None
+
+
+def test_every_unsubscribe_link_of_a_subscription_works_until_one_is_used(store: SubscriptionStore) -> None:
+    sem = store.add_active(SEM, EMAIL, NOW)
+    # One link per brief: an old brief, read weeks later, still has a working link.
+    old = store.unsubscribe_token(sem, NOW)
+    new = store.unsubscribe_token(sem, NOW + timedelta(weeks=1))
+
+    assert old != new
+    assert store.check_unsubscribe(old) is UnsubscribeOutcome.READY
+    store.unsubscribe(new, NOW + timedelta(weeks=8))
+
+    assert store.check_unsubscribe(old) is UnsubscribeOutcome.ALREADY_UNSUBSCRIBED
+    assert store.unsubscribe(old, NOW).outcome is UnsubscribeOutcome.ALREADY_UNSUBSCRIBED
+
+
+def test_an_unsubscribe_link_from_before_a_new_subscription_does_not_end_it(store: SubscriptionStore) -> None:
+    sem = store.add_active(SEM, EMAIL, NOW)
+    old = store.unsubscribe_token(sem, NOW)
+    store.unsubscribe(store.unsubscribe_token(sem, NOW), NOW)
+    store.add_active(SEM, EMAIL, NOW + timedelta(days=1))
+
+    result = store.unsubscribe(old, NOW + timedelta(days=2))
+
+    assert result.outcome is UnsubscribeOutcome.ALREADY_UNSUBSCRIBED
+    assert store.list_active() == [sem]
+
+
+def test_checking_an_unsubscribe_link_does_not_use_it(store: SubscriptionStore) -> None:
+    sem = store.add_active(SEM, EMAIL, NOW)
+    token = store.unsubscribe_token(sem, NOW)
+
+    assert store.check_unsubscribe(token) is UnsubscribeOutcome.READY
+    assert store.check_unsubscribe(token) is UnsubscribeOutcome.READY
+    assert store.list_active() == [sem]
+
+
+def test_an_unknown_unsubscribe_token_is_refused(store: SubscriptionStore) -> None:
+    store.add_active(SEM, EMAIL, NOW)
+
+    assert store.check_unsubscribe("no-such-token") is UnsubscribeOutcome.UNKNOWN
+    assert store.unsubscribe("no-such-token", NOW).outcome is UnsubscribeOutcome.UNKNOWN
+    assert store.list_active() == [Subscription(SEM, EMAIL)]
+
+
+def test_unsubscribe_tokens_are_random_and_only_their_hash_is_kept(tmp_path: Path) -> None:
+    path = tmp_path / "standup.sqlite3"
+    store = SubscriptionStore(path)
+    sem = store.add_active(SEM, EMAIL, NOW)
+    tokens = {store.unsubscribe_token(sem, NOW) for _ in range(20)}
+
+    with closing(sqlite3.connect(path)) as db:
+        dump = "\n".join(db.iterdump())
+
+    assert len(tokens) == 20
+    assert all(len(token) >= 43 for token in tokens)
+    assert not any(token in dump for token in tokens)
