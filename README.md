@@ -128,6 +128,11 @@ Each brief ends with an unsubscribe link for its subscription.
 Opening it shows an Unsubscribe button, and pressing it ends that subscription only.
 The guarantor's other subscriptions keep going.
 Each brief gets a new link, and every link of a subscription works until the subscription ends, with no time limit.
+A brief sent again on a retry gets a new link too.
+When the subscription ends, in either way, all its links stop working, so an old link never ends a later subscription to the same instrument.
+An old link then says "Already unsubscribed"; after a guarantor change it also says that the booking system no longer lists the email as the guarantor, without saying who the guarantor is now.
+Unsubscribing keeps the ended subscription in the database, as a guarantor change does.
+The stop notice has no unsubscribe link, because its subscription has already ended.
 The brief also carries the `List-Unsubscribe` and `List-Unsubscribe-Post` mail headers (RFC 8058), so mail apps can show their own unsubscribe button.
 
 Set `PUBLIC_BASE_URL` in `.env` to the address the page is opened at, for example `http://localhost:8000` when testing.
