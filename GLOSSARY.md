@@ -66,6 +66,8 @@ _Avoid_: Certification, training, licence
 
 **New user**:
 A user whose reservation is one of their first 3 on the instrument since the start of their earliest certificate for it.
+The setting `NEW_USER_RESERVATIONS` can change the 3.
+A user with no certificate for the instrument is not a new user.
 _Avoid_: First-timer, newcomer, beginner
 
 **Note**:

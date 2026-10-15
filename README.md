@@ -17,6 +17,9 @@ Copy `.env.example` to `.env` and fill it in.
 `WORKING_DAY_START` and `WORKING_DAY_END` (default 07:00 and 19:00) set the working day, Monday to Friday.
 The Heads-up section of the brief lists the reservations outside it.
 
+`NEW_USER_RESERVATIONS` (default 3) sets how many first reservations on an instrument are by a new user.
+They count from the start of the user's earliest certificate for the instrument.
+
 ## Test, lint, and format
 
 ```bash

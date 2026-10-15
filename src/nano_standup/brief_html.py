@@ -128,7 +128,8 @@ def _heads_up_html(heads_up: HeadsUp) -> str:
 
 def _heads_up_item_html(item: HeadsUpItem) -> str:
     # A narrow screen may break the line between the day, the time span, and the user, never inside "Tue 20. 10.".
-    return f"<li>{_unbroken(item.day)} {item.span.text(_unbroken)}, {_html_text(item.user_name)}</li>"
+    detail = f" ({_unbroken(html.escape(item.detail))})" if item.detail else ""
+    return f"<li>{_unbroken(item.day)} {item.span.text(_unbroken)}, {_html_text(item.user_name)}{detail}</li>"
 
 
 def _day_html(day: Day) -> str:
@@ -156,12 +157,9 @@ def _row_html(row: Row) -> str:
     )
     # A narrow column may break the time span only around "from" and "to", never inside "Wed 13:00".
     span = row.span.text(_unbroken)
-    mark = (
-        '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;'
-        f'color:{style.mark_color};">{row.mark}</div>'
-        if row.mark
-        else ""
-    )
+    # The status mark in the status colour, then the user marks in amber, each on its own line.
+    status_mark = _mark_html(row.mark, style.mark_color) if row.mark else ""
+    marks = status_mark + "".join(_mark_html(mark, AMBER_TEXT) for mark in row.user_marks)
     experiment_plan = (
         _html_text(row.experiment_plan)
         if row.experiment_plan
@@ -175,12 +173,19 @@ def _row_html(row: Row) -> str:
               <div style="color:{GREY_TEXT};font-size:12px;">{row.length}</div>
             </td>
             <td style="padding:10px 0;vertical-align:top;{text_cell_highlight}">
-              {mark}{_div("font-weight:700;", _html_text(row.user_name), style.crossed_out)}
+              {marks}{_div("font-weight:700;", _html_text(row.user_name), style.crossed_out)}
               {_div(f"color:{GREY_TEXT};font-size:12px;", _html_text(row.project_code), style.crossed_out)}
               {_div("margin-top:4px;", experiment_plan, style.crossed_out)}
               {notes}
             </td>
           </tr>"""
+
+
+def _mark_html(mark: str, color: str) -> str:
+    return (
+        '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;'
+        f'color:{color};">{html.escape(mark)}</div>'
+    )
 
 
 def _div(style: str, inner_html: str, crossed_out: bool) -> str:

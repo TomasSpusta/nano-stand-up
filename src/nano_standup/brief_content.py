@@ -1,6 +1,6 @@
 """What a brief shows, worked out once from an instrument's week. The HTML and plain-text versions both draw it."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
@@ -10,11 +10,13 @@ from nano_standup.domain import (
     Instrument,
     Reservation,
     ReservationStatus,
+    UserFacts,
     Week,
-    WorkingHours,
+    day_month,
+    day_month_year,
     day_name,
 )
-from nano_standup.heads_ups import WAITING_FOR_APPROVAL, heads_up_rules
+from nano_standup.heads_ups import WAITING_FOR_APPROVAL, Finding, HeadsUpRule, HeadsUpSettings, heads_up_rules
 
 NO_EXPERIMENT_PLAN = "No experiment plan given"
 NO_RESERVATIONS_THIS_WEEK = "No reservations this week."
@@ -73,10 +75,18 @@ class Row:
     experiment_plan: str
     note: str
     private_note: str
+    # From the heads-up rules about the user, such as "New user, no. 2", in the order of the rules.
+    user_marks: list[str]
 
     @property
     def mark(self) -> str:
+        """The status mark, such as "Cancelled". Empty for a reserved reservation."""
         return MARKS.get(self.status, "")
+
+    @property
+    def marks(self) -> list[str]:
+        """The status mark first, then the user marks."""
+        return ([self.mark] if self.mark else []) + self.user_marks
 
     @property
     def notes(self) -> list[LabelledNote]:
@@ -95,6 +105,8 @@ class HeadsUpItem:
     day: str
     span: TimeSpan
     user_name: str
+    # What the rule adds about it, such as "no. 2" or "expired 31. 5. 2026". Empty when it adds nothing.
+    detail: str
 
 
 @dataclass(frozen=True)
@@ -112,7 +124,7 @@ class Day:
 
     @property
     def heading(self) -> str:
-        return f"{day_name(self.calendar_day)} {_day_month(self.calendar_day)}"
+        return f"{day_name(self.calendar_day)} {day_month(self.calendar_day)}"
 
 
 @dataclass(frozen=True)
@@ -133,26 +145,38 @@ class BriefContent:
         return bool(self.days)
 
 
+@dataclass(frozen=True)
+class _Checked:
+    """A reservation with what each heads-up rule found about it."""
+
+    reservation: Reservation
+    # One for each rule, in the order of the rules. None where the rule does not match.
+    findings: list[Finding | None]
+
+
 def brief_content(
     instrument: Instrument,
     week: Week,
     reservations: list[Reservation],
+    user_facts: Mapping[str, UserFacts],
     built_at: datetime,
-    working_hours: WorkingHours,
+    settings: HeadsUpSettings,
 ) -> BriefContent:
-    """`built_at` must carry a time zone; the footer shows it in Prague time."""
+    """`user_facts` by user id. `built_at` must carry a time zone; the footer shows it in Prague time."""
     if built_at.tzinfo is None:
         raise ValueError(f"built_at must carry a time zone, got {built_at.isoformat()}")
     reservations = sorted(reservations, key=lambda r: r.start)
+    rules = heads_up_rules(settings, instrument.guarantor.user_id, user_facts)
+    checked = [_Checked(r, [rule.check(r) for rule in rules]) for r in reservations]
     built_local = built_at.astimezone(PRAGUE)
     return BriefContent(
         subject=f"Brief: {instrument.alias} - week {_week_span(week)}",
         for_whom=f"Weekly brief for {instrument.guarantor.name}",
         instrument_name=instrument.name,
-        week_line=f"{instrument.alias} - Monday {_day_month(week.monday)} to Sunday {_day_month_year(week.sunday)}",
+        week_line=f"{instrument.alias} - Monday {day_month(week.monday)} to Sunday {day_month_year(week.sunday)}",
         counts=_counts(week, reservations) if reservations else [],
-        heads_ups=_heads_ups(week, reservations, working_hours),
-        days=_days(week, reservations) if reservations else [],
+        heads_ups=_heads_ups(week, rules, checked),
+        days=_days(week, checked) if reservations else [],
         built=f"Built on {_full_date(built_local.date())} at {built_local:%H:%M}.",
     )
 
@@ -180,18 +204,23 @@ def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
     ]
 
 
-def _heads_ups(week: Week, reservations: list[Reservation], working_hours: WorkingHours) -> list[HeadsUp]:
+def _heads_ups(week: Week, rules: list[HeadsUpRule], checked: list[_Checked]) -> list[HeadsUp]:
     """The rules that match, in a fixed order, each with its reservations in the order given."""
     heads_ups = [
-        HeadsUp(rule.title, [_heads_up_item(r, week) for r in reservations if rule.matches(r)])
-        for rule in heads_up_rules(working_hours)
+        HeadsUp(
+            rule.title,
+            [_heads_up_item(c.reservation, finding, week) for c in checked if (finding := c.findings[i]) is not None],
+        )
+        for i, rule in enumerate(rules)
     ]
     return [heads_up for heads_up in heads_ups if heads_up.items]
 
 
-def _heads_up_item(reservation: Reservation, week: Week) -> HeadsUpItem:
+def _heads_up_item(reservation: Reservation, finding: Finding, week: Week) -> HeadsUpItem:
     day = _shown_on(reservation, week)
-    return HeadsUpItem(f"{_short_day_name(day)} {_day_month(day)}", _span(reservation, day), reservation.user_name)
+    return HeadsUpItem(
+        f"{_short_day_name(day)} {day_month(day)}", _span(reservation, day), reservation.user_name, finding.detail
+    )
 
 
 def _shown_on(reservation: Reservation, week: Week) -> date:
@@ -199,18 +228,19 @@ def _shown_on(reservation: Reservation, week: Week) -> date:
     return max(reservation.start.date(), week.monday)
 
 
-def _days(week: Week, reservations: list[Reservation]) -> list[Day]:
+def _days(week: Week, checked: list[_Checked]) -> list[Day]:
     """Every weekday, empty or not. Weekend days only when they have reservations."""
     days = []
     for day in week.days():
-        rows = [_row(r, day) for r in reservations if _shown_on(r, week) == day]
+        rows = [_row(c, day) for c in checked if _shown_on(c.reservation, week) == day]
         if rows or day.weekday() not in WEEKEND:
             days.append(Day(day, rows))
     return days
 
 
-def _row(reservation: Reservation, day: date) -> Row:
+def _row(checked: _Checked, day: date) -> Row:
     """`day` is the day the row shows on."""
+    reservation = checked.reservation
     note = reservation.note.strip()
     return Row(
         status=reservation.status,
@@ -221,6 +251,7 @@ def _row(reservation: Reservation, day: date) -> Row:
         experiment_plan=reservation.experiment_plan.strip(),
         note=note if _adds_to(note, reservation.experiment_plan) else "",
         private_note=reservation.private_note.strip(),
+        user_marks=[finding.row_mark for finding in checked.findings if finding is not None and finding.row_mark],
     )
 
 
@@ -258,7 +289,7 @@ def _time_seen_from(moment: datetime, day: date) -> str:
     if abs(moment.date() - day) < timedelta(days=7):
         return f"{_short_day_name(moment.date())} {moment:%H:%M}"
     year = f" {moment.year}" if moment.year != day.year else ""
-    return f"{_short_day_name(moment.date())} {_day_month(moment.date())}{year} {moment:%H:%M}"
+    return f"{_short_day_name(moment.date())} {day_month(moment.date())}{year} {moment:%H:%M}"
 
 
 def _length(reservation: Reservation) -> str:
@@ -282,10 +313,10 @@ def _week_span(week: Week) -> str:
     """The week as "19.-25. 10. 2026", or "28. 9.-4. 10. 2026" when the week spans two months."""
     monday, sunday = week.monday, week.sunday
     if monday.year != sunday.year:
-        return f"{_day_month_year(monday)}-{_day_month_year(sunday)}"
+        return f"{day_month_year(monday)}-{day_month_year(sunday)}"
     if monday.month != sunday.month:
-        return f"{_day_month(monday)}-{_day_month_year(sunday)}"
-    return f"{monday.day}.-{_day_month_year(sunday)}"
+        return f"{day_month(monday)}-{day_month_year(sunday)}"
+    return f"{monday.day}.-{day_month_year(sunday)}"
 
 
 def _short_day_name(day: date) -> str:
@@ -293,15 +324,6 @@ def _short_day_name(day: date) -> str:
     return day_name(day)[:3]
 
 
-def _day_month(day: date) -> str:
-    return f"{day.day}. {day.month}."
-
-
-def _day_month_year(day: date) -> str:
-    """A day with its year, such as "20. 10. 2026"."""
-    return f"{_day_month(day)} {day.year}"
-
-
 def _full_date(day: date) -> str:
     """A day with its name and year, such as "Tuesday 20. 10. 2026"."""
-    return f"{day_name(day)} {_day_month_year(day)}"
+    return f"{day_name(day)} {day_month_year(day)}"

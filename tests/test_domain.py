@@ -1,8 +1,8 @@
-from datetime import date, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 import pytest
 
-from nano_standup.domain import Week, WorkingHours
+from nano_standup.domain import Certificate, Week, WorkingHours
 
 from helpers import reservation
 
@@ -55,3 +55,23 @@ def test_time_inside_a_week_leaves_out_time_before_monday_and_after_sunday(start
 def test_a_working_day_must_start_before_it_ends(start: time, end: time) -> None:
     with pytest.raises(ValueError, match="Working day must start before it ends"):
         WorkingHours(start, end)
+
+
+@pytest.mark.parametrize(
+    ("start", "covered"),
+    [
+        ("2026-09-30T23:59", False),
+        # Both the first and the last day count in full.
+        ("2026-10-01T00:00", True),
+        ("2026-10-31T23:59", True),
+        ("2026-11-01T00:00", False),
+    ],
+)
+def test_a_certificate_covers_its_first_and_last_day(start: str, covered: bool) -> None:
+    certificate = Certificate(valid_from=date(2026, 10, 1), valid_to=date(2026, 10, 31))
+
+    assert certificate.covers(datetime.fromisoformat(start)) is covered
+
+
+def test_a_certificate_without_an_end_covers_every_day_from_its_start() -> None:
+    assert Certificate(valid_from=date(2026, 10, 1), valid_to=None).covers(datetime(2040, 1, 1))
