@@ -24,7 +24,8 @@ log = logging.getLogger("nano_standup")
 EXIT_UNEXPECTED_ERROR = 1
 # A setting, an instrument id, or a guarantor email is wrong.
 EXIT_INPUT_ERROR = 2
-# The Monday job ended with briefs not sent. The service admin got an error report, if the mail server took it.
+# The Monday job ended with briefs not sent, or sent but not recorded.
+# The service admin got an error report, if the mail server took it.
 EXIT_BRIEFS_NOT_SENT = 3
 
 
@@ -82,7 +83,7 @@ def _run_monday_job(settings: Settings, clock: Clock, sleep: Sleep) -> int:
         service_admin_email=settings.service_admin_email,
         working_hours=settings.working_hours,
     )
-    return EXIT_BRIEFS_NOT_SENT if result.failed else 0
+    return EXIT_BRIEFS_NOT_SENT if result.failed or result.not_recorded else 0
 
 
 def _booking_source(settings: Settings) -> ApiBookingSource:

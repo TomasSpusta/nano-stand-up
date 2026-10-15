@@ -1,4 +1,5 @@
 import logging
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from nano_standup.domain import Guarantor, Instrument, Reservation, ReservationS
 from nano_standup.mail import InMemoryMailSender, MailSender, Message
 from nano_standup.monday_job import MondayJobResult, run_monday_job
 from nano_standup.sent_briefs import SentBriefStore
-from nano_standup.subscriptions import SubscriptionStore
+from nano_standup.subscriptions import Subscription, SubscriptionStore
 
 from helpers import INSTRUMENT, WORKING_HOURS, heads_up_text, reservation, visible_text
 
@@ -79,18 +80,32 @@ class FailingMailSender(InMemoryMailSender):
         super().send(message)
 
 
+class FailingSentBriefStore(SentBriefStore):
+    """The real record of sent briefs, but recording fails for some instruments."""
+
+    def __init__(self, path: Path, failing: set[str]) -> None:
+        super().__init__(path)
+        self._failing = failing
+
+    def record(self, subscription: Subscription, week: Week, sent_at: datetime) -> None:
+        if subscription.instrument_id in self._failing:
+            raise sqlite3.OperationalError("database is locked")
+        super().record(subscription, week, sent_at)
+
+
 def _run(
     source: BookingSource,
     database: Path,
     mail_sender: MailSender,
     time: FakeTime | None = None,
+    sent_briefs: SentBriefStore | None = None,
 ) -> MondayJobResult:
     """Runs the Monday job with the default working hours. The time is Monday 08:00 unless given."""
     time = time or FakeTime(MONDAY_8AM)
     return run_monday_job(
         source,
         SubscriptionStore(database),
-        SentBriefStore(database),
+        sent_briefs or SentBriefStore(database),
         mail_sender,
         clock=time.clock,
         sleep=time.sleep,
@@ -270,7 +285,7 @@ def test_a_mail_server_failure_is_retried(tmp_path: Path) -> None:
     assert (result.sent, result.failed) == (2, ())
 
 
-def test_a_failure_still_there_at_10_alerts_the_service_admin_once(tmp_path: Path) -> None:
+def test_a_failure_still_there_at_10_sends_one_error_report_to_the_service_admin(tmp_path: Path) -> None:
     database = tmp_path / "standup.sqlite3"
     _subscribe_both(database)
     time = FakeTime(MONDAY_8AM)
@@ -284,12 +299,12 @@ def test_a_failure_still_there_at_10_alerts_the_service_admin_once(tmp_path: Pat
     # Tries every 15 minutes from 08:00 up to and including 10:00 Prague time, then stops.
     tries = [MONDAY_8AM + timedelta(minutes=15 * i) for i in range(9)]
     assert source.failed_at == [t for t in tries for _ in (INSTRUMENT, OTHER)]
-    [alert] = mail_sender.sent
-    assert alert.to == "admin@example.org"
-    assert alert.subject == "Nano Stand-up: 2 briefs not sent for the week of 19. 10. 2026"
-    assert "instr-1 to hana.testova@example.org: Booking API request /api/equipment/instr-1 failed" in alert.text
-    assert "instr-2 to ota.zkusebni@example.org: Booking API request /api/equipment/instr-2 failed" in alert.text
-    assert "instr-1 to hana.testova@example.org" in visible_text(alert.html)
+    [error_report] = mail_sender.sent
+    assert error_report.to == "admin@example.org"
+    assert error_report.subject == "Nano Stand-up: 2 briefs not sent for the week of 19. 10. 2026"
+    assert "instr-1 to hana.testova@example.org: Booking API request /api/equipment/instr-1 failed" in error_report.text
+    assert "instr-2 to ota.zkusebni@example.org: Booking API request /api/equipment/instr-2 failed" in error_report.text
+    assert "instr-1 to hana.testova@example.org" in visible_text(error_report.html)
     assert result.sent == 0
     assert [f.subscription.instrument_id for f in result.failed] == [INSTRUMENT.id, OTHER.id]
 
@@ -303,17 +318,17 @@ def test_one_instrument_failing_does_not_stop_the_others(tmp_path: Path) -> None
 
     result = _run(source, database, mail_sender, time)
 
-    brief, alert = mail_sender.sent
+    brief, error_report = mail_sender.sent
     assert (brief.to, brief.subject) == ("ota.zkusebni@example.org", "Brief: TEST-LAB - week 19.-25. 10. 2026")
     assert "at 08:00." in brief.text
-    assert alert.to == "admin@example.org"
-    assert alert.subject == "Nano Stand-up: 1 brief not sent for the week of 19. 10. 2026"
-    assert "instr-1 to hana.testova@example.org" in alert.text
-    assert "instr-2" not in alert.text
+    assert error_report.to == "admin@example.org"
+    assert error_report.subject == "Nano Stand-up: 1 brief not sent for the week of 19. 10. 2026"
+    assert "instr-1 to hana.testova@example.org" in error_report.text
+    assert "instr-2" not in error_report.text
     assert result.sent == 1
 
 
-def test_a_re_run_after_10_tries_once_then_alerts_without_waiting(tmp_path: Path) -> None:
+def test_a_re_run_after_10_tries_once_then_sends_the_error_report_without_waiting(tmp_path: Path) -> None:
     database = tmp_path / "standup.sqlite3"
     _subscribe_both(database)
     start = MONDAY_8AM + timedelta(hours=3)
@@ -358,7 +373,7 @@ def test_the_run_logs_instruments_briefs_and_errors(tmp_path: Path, caplog: pyte
     )
     assert (
         "Monday job for the week of 19. 10. 2026: 2 instruments processed, 1 brief sent,"
-        " 0 already sent before, 1 failed" in messages
+        " 0 briefs already sent before, 1 brief failed, 0 briefs sent but not recorded" in messages
     )
 
 
@@ -379,3 +394,67 @@ def test_a_mail_server_down_all_morning_logs_the_error_report_it_could_not_send(
         r.levelno == logging.ERROR and r.getMessage().startswith("Cannot send the error report to the service admin")
         for r in caplog.records
     )
+
+
+def test_a_brief_sent_but_not_recorded_does_not_stop_the_others_and_is_in_the_error_report(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    time = FakeTime(MONDAY_8AM)
+    mail_sender = InMemoryMailSender()
+
+    result = _run(
+        FakeBookingSource(instruments=[INSTRUMENT, OTHER]),
+        database,
+        mail_sender,
+        time,
+        sent_briefs=FailingSentBriefStore(database, failing={INSTRUMENT.id}),
+    )
+
+    first, second, error_report = mail_sender.sent
+    assert [first.to, second.to] == ["hana.testova@example.org", "ota.zkusebni@example.org"]
+    assert error_report.to == "admin@example.org"
+    assert error_report.subject == "Nano Stand-up: 1 brief sent but not recorded for the week of 19. 10. 2026"
+    assert "instr-1 to hana.testova@example.org: database is locked" in error_report.text
+    assert "a re-run sends them again" in error_report.text
+    # Sent, so not tried again.
+    assert time.now == MONDAY_8AM
+    assert (result.sent, result.failed) == (2, ())
+    assert [f.subscription.instrument_id for f in result.not_recorded] == [INSTRUMENT.id]
+
+
+def test_an_instrument_not_in_the_booking_system_fails_at_once_without_retries(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    store = SubscriptionStore(database)
+    store.add_active("instr-gone", "hana.testova@example.org", MONDAY_8AM)
+    store.add_active(OTHER.id, "ota.zkusebni@example.org", MONDAY_8AM)
+    time = FakeTime(MONDAY_8AM)
+    mail_sender = InMemoryMailSender()
+
+    result = _run(FakeBookingSource(instruments=[OTHER]), database, mail_sender, time)
+
+    brief, error_report = mail_sender.sent
+    assert brief.to == "ota.zkusebni@example.org"
+    assert error_report.subject == "Nano Stand-up: 1 brief not sent for the week of 19. 10. 2026"
+    assert "instr-gone to hana.testova@example.org: No instrument with id 'instr-gone'" in error_report.text
+    assert time.now == MONDAY_8AM
+    assert [f.subscription.instrument_id for f in result.failed] == ["instr-gone"]
+
+
+def test_the_error_report_lists_briefs_not_sent_and_briefs_not_recorded(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    time = FakeTime(MONDAY_8AM + timedelta(hours=3))
+    source = FailingBookingSource(FakeBookingSource(instruments=[INSTRUMENT, OTHER]), time, failing={INSTRUMENT.id})
+    mail_sender = InMemoryMailSender()
+
+    _run(source, database, mail_sender, time, sent_briefs=FailingSentBriefStore(database, failing={OTHER.id}))
+
+    brief, error_report = mail_sender.sent
+    assert error_report.subject == (
+        "Nano Stand-up: 1 brief not sent, 1 brief sent but not recorded for the week of 19. 10. 2026"
+    )
+    not_sent, not_recorded = error_report.text.split("sent but not recorded", 1)
+    assert "instr-1 to hana.testova@example.org" in not_sent
+    assert "instr-2 to ota.zkusebni@example.org: database is locked" in not_recorded
