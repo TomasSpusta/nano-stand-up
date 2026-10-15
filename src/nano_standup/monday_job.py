@@ -3,7 +3,7 @@
 import logging
 from nano_standup.booking_source import BookingSource
 from nano_standup.brief import build_brief
-from nano_standup.domain import PRAGUE, Clock, Week
+from nano_standup.domain import PRAGUE, Clock, Week, WorkingHours
 from nano_standup.mail import MailSender, Message
 from nano_standup.subscriptions import SubscriptionStore
 
@@ -16,6 +16,7 @@ def run_monday_job(
     mail_sender: MailSender,
     clock: Clock,
     from_address: str,
+    working_hours: WorkingHours,
 ) -> int:
     """Send the briefs and return how many went out. The week is the one that holds today in Prague."""
     now = clock()
@@ -24,7 +25,7 @@ def run_monday_job(
     for subscription in subscriptions.list_active():
         instrument = source.get_instrument(subscription.instrument_id)
         reservations = source.get_reservations(instrument.id, week)
-        brief = build_brief(instrument, week, reservations, built_at=now)
+        brief = build_brief(instrument, week, reservations, built_at=now, working_hours=working_hours)
         mail_sender.send(
             Message(from_address=from_address, to=subscription.email, subject=brief.subject, html=brief.html, text=brief.text)
         )

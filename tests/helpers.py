@@ -1,12 +1,13 @@
 """Test helpers and made-up fixtures. Never put real data from the booking system here: the repo is public."""
 
-from datetime import datetime
+from datetime import datetime, time
 from html.parser import HTMLParser
 
-from nano_standup.domain import Guarantor, Instrument, Reservation, ReservationStatus
+from nano_standup.domain import Guarantor, Instrument, Reservation, ReservationStatus, WorkingHours
 
 GUARANTOR = Guarantor(name="Hana Testova", email="hana.testova@example.org")
 INSTRUMENT = Instrument(id="instr-1", name="Test Electron Microscope", alias="TEST-SEM", guarantor=GUARANTOR)
+WORKING_HOURS = WorkingHours(time(7, 0), time(19, 0))
 
 
 def reservation(

@@ -9,7 +9,7 @@ from datetime import datetime
 from nano_standup.brief_content import brief_content
 from nano_standup.brief_html import brief_html
 from nano_standup.brief_text import brief_text
-from nano_standup.domain import Instrument, Reservation, Week
+from nano_standup.domain import Instrument, Reservation, Week, WorkingHours
 
 
 @dataclass(frozen=True)
@@ -20,8 +20,12 @@ class Brief:
 
 
 def build_brief(
-    instrument: Instrument, week: Week, reservations: list[Reservation], built_at: datetime
+    instrument: Instrument,
+    week: Week,
+    reservations: list[Reservation],
+    built_at: datetime,
+    working_hours: WorkingHours,
 ) -> Brief:
     """Build one brief. `built_at` must carry a time zone; the footer shows it in Prague time."""
-    content = brief_content(instrument, week, reservations, built_at)
+    content = brief_content(instrument, week, reservations, built_at, working_hours)
     return Brief(subject=content.subject, html=brief_html(content), text=brief_text(content))

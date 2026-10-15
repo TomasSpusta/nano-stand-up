@@ -77,9 +77,43 @@ class Reservation:
         return self.end - self.start
 
     @property
+    def will_happen(self) -> bool:
+        """Not cancelled. A requested reservation may still happen, so it counts."""
+        return self.status is not ReservationStatus.CANCELLED
+
+    @property
     def lacks_experiment_plan(self) -> bool:
-        """A cancelled reservation will not happen, so it needs no experiment plan."""
-        return self.status is not ReservationStatus.CANCELLED and not self.experiment_plan.strip()
+        """A cancelled reservation needs no experiment plan."""
+        return self.will_happen and not self.experiment_plan.strip()
+
+
+@dataclass(frozen=True)
+class WorkingHours:
+    """The working day, Monday to Friday. A reservation outside it may need an after-hours safety check."""
+
+    start: time
+    end: time
+
+    def __post_init__(self) -> None:
+        if self.start >= self.end:
+            raise ValueError(f"Working day must start before it ends, got {self.start:%H:%M} to {self.end:%H:%M}")
+
+    def covers(self, reservation: Reservation) -> bool:
+        """True when the reservation starts and ends inside one working day.
+
+        Times compare to the minute, as the brief shows them: an end at 19:00:30 shows as 19:00, and is inside.
+        """
+        start, end = reservation.start, reservation.end
+        return (
+            start.weekday() not in WEEKEND
+            and end.date() == start.date()
+            and _to_the_minute(start.time()) >= self.start
+            and _to_the_minute(end.time()) <= self.end
+        )
+
+
+def _to_the_minute(moment: time) -> time:
+    return moment.replace(second=0, microsecond=0)
 
 
 @dataclass(frozen=True)

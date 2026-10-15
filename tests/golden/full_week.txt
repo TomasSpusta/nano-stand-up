@@ -2,8 +2,6 @@ Weekly brief for Hana Testova
 Test Electron Microscope
 TEST-SEM - Monday 19. 10. to Sunday 25. 10. 2026
 
-2 waiting for your approval, 5 reservations, 69.2 h booked, 3 users, 1 without an experiment plan, 1 cancelled
-
 HEADS-UP
   Waiting for your approval
     Tue 20. 10. 15:00 to Wed 13:00, Karel Neexistujici
@@ -16,6 +14,8 @@ HEADS-UP
     Sat 24. 10. 10:00 to Mon 2. 11. 10:00, Petr Vymysleny
   Cancelled
     Wed 21. 10. 09:00 to 10:00, Eva <Testova>
+
+2 waiting for your approval, 5 reservations, 69.2 h booked, 3 users, 1 without an experiment plan, 1 cancelled
 
 MONDAY 19. 10.
   from Sun 22:00 to 06:00 (8 h)

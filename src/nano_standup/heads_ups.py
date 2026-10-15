@@ -5,13 +5,8 @@ Each rule gives its matching reservations, or none. The brief shows only the rul
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import time
 
-from nano_standup.domain import WEEKEND, Reservation, ReservationStatus
-
-# Working hours, Monday to Friday. A reservation outside them may need an after-hours safety check.
-WORKING_DAY_START = time(7, 0)
-WORKING_DAY_END = time(19, 0)
+from nano_standup.domain import Reservation, ReservationStatus, WorkingHours
 
 
 @dataclass(frozen=True)
@@ -22,38 +17,30 @@ class HeadsUpRule:
 
 @dataclass(frozen=True)
 class HeadsUpMatch:
+    """A rule that matched, with its reservations. The brief turns it into a heads-up it can show."""
+
     title: str
     reservations: list[Reservation]
 
 
-def _outside_working_hours(reservation: Reservation) -> bool:
-    """Starts before the working day, ends after it or on a later day, or starts on a weekend.
-
-    A cancelled reservation will not happen, so it needs no safety check.
-    """
-    start, end = reservation.start, reservation.end
-    return reservation.status is not ReservationStatus.CANCELLED and (
-        start.time() < WORKING_DAY_START
-        or end.time() > WORKING_DAY_END
-        or end.date() > start.date()
-        or start.weekday() in WEEKEND
-    )
-
-
-# First the reservations the guarantor has to approve, as in the counts.
-RULES = [
-    HeadsUpRule("Waiting for your approval", lambda reservation: reservation.status is ReservationStatus.REQUESTED),
-    HeadsUpRule("No experiment plan", lambda reservation: reservation.lacks_experiment_plan),
-    HeadsUpRule(
-        f"Outside working hours ({WORKING_DAY_START:%H:%M} to {WORKING_DAY_END:%H:%M}, Monday to Friday)",
-        _outside_working_hours,
-    ),
-    # The guarantor can re-plan a freed slot.
-    HeadsUpRule("Cancelled", lambda reservation: reservation.status is ReservationStatus.CANCELLED),
-]
+def _rules(working_hours: WorkingHours) -> list[HeadsUpRule]:
+    # First the reservations the guarantor has to approve, as in the counts.
+    return [
+        HeadsUpRule("Waiting for your approval", lambda reservation: reservation.status is ReservationStatus.REQUESTED),
+        HeadsUpRule("No experiment plan", lambda reservation: reservation.lacks_experiment_plan),
+        HeadsUpRule(
+            f"Outside working hours ({working_hours.start:%H:%M} to {working_hours.end:%H:%M}, Monday to Friday)",
+            # A cancelled reservation needs no safety check.
+            lambda reservation: reservation.will_happen and not working_hours.covers(reservation),
+        ),
+        # The guarantor can re-plan a freed slot.
+        HeadsUpRule("Cancelled", lambda reservation: not reservation.will_happen),
+    ]
 
 
-def heads_ups(reservations: list[Reservation]) -> list[HeadsUpMatch]:
+def heads_up_matches(reservations: list[Reservation], working_hours: WorkingHours) -> list[HeadsUpMatch]:
     """The rules that match, in a fixed order, each with its reservations in the order given."""
-    matches = [HeadsUpMatch(rule.title, [r for r in reservations if rule.matches(r)]) for rule in RULES]
+    matches = [
+        HeadsUpMatch(rule.title, [r for r in reservations if rule.matches(r)]) for rule in _rules(working_hours)
+    ]
     return [match for match in matches if match.reservations]

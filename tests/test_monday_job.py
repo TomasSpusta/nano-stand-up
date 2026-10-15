@@ -7,7 +7,7 @@ from nano_standup.mail import InMemoryMailSender
 from nano_standup.monday_job import run_monday_job
 from nano_standup.subscriptions import SubscriptionStore
 
-from helpers import INSTRUMENT, reservation, visible_text
+from helpers import INSTRUMENT, WORKING_HOURS, reservation, visible_text
 
 # Monday 19 October 2026, 08:00 in Prague.
 MONDAY_8AM = datetime(2026, 10, 19, 6, 0, tzinfo=UTC)
@@ -37,7 +37,14 @@ def test_sends_one_brief_per_active_subscription_to_the_subscriber(tmp_path: Pat
     store.add_active(OTHER.id, "ota.zkusebni@example.org", MONDAY_8AM)
     mail_sender = InMemoryMailSender()
 
-    run_monday_job(source, store, mail_sender, clock=lambda: MONDAY_8AM, from_address="standup@example.org")
+    run_monday_job(
+        source,
+        store,
+        mail_sender,
+        clock=lambda: MONDAY_8AM,
+        from_address="standup@example.org",
+        working_hours=WORKING_HOURS,
+    )
 
     sent = sorted(mail_sender.sent, key=lambda m: m.to)
     assert [(m.to, m.subject) for m in sent] == [
@@ -64,6 +71,7 @@ def test_sends_nothing_without_subscriptions(tmp_path: Path) -> None:
         mail_sender,
         clock=lambda: MONDAY_8AM,
         from_address="standup@example.org",
+        working_hours=WORKING_HOURS,
     )
 
     assert mail_sender.sent == []
@@ -85,7 +93,14 @@ def test_a_brief_shows_cancelled_and_overnight_reservations_in_both_versions(tmp
     store.add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
     mail_sender = InMemoryMailSender()
 
-    run_monday_job(source, store, mail_sender, clock=lambda: MONDAY_8AM, from_address="standup@example.org")
+    run_monday_job(
+        source,
+        store,
+        mail_sender,
+        clock=lambda: MONDAY_8AM,
+        from_address="standup@example.org",
+        working_hours=WORKING_HOURS,
+    )
 
     [message] = mail_sender.sent
     html_text = visible_text(message.html)
@@ -110,7 +125,14 @@ def test_a_brief_points_out_heads_ups_in_both_versions(tmp_path: Path) -> None:
     store.add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
     mail_sender = InMemoryMailSender()
 
-    run_monday_job(source, store, mail_sender, clock=lambda: MONDAY_8AM, from_address="standup@example.org")
+    run_monday_job(
+        source,
+        store,
+        mail_sender,
+        clock=lambda: MONDAY_8AM,
+        from_address="standup@example.org",
+        working_hours=WORKING_HOURS,
+    )
 
     [message] = mail_sender.sent
     assert (

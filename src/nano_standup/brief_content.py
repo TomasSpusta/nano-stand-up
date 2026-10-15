@@ -3,8 +3,17 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from nano_standup.domain import PRAGUE, WEEKEND, Instrument, Reservation, ReservationStatus, Week, day_name
-from nano_standup.heads_ups import heads_ups
+from nano_standup.domain import (
+    PRAGUE,
+    WEEKEND,
+    Instrument,
+    Reservation,
+    ReservationStatus,
+    Week,
+    WorkingHours,
+    day_name,
+)
+from nano_standup.heads_ups import heads_up_matches
 
 NO_EXPERIMENT_PLAN = "No experiment plan given"
 NO_RESERVATIONS_THIS_WEEK = "No reservations this week."
@@ -67,11 +76,23 @@ def time_span(start: str, end: str, runs_in: bool) -> str:
 
 
 @dataclass(frozen=True)
+class HeadsUpItem:
+    """One matching reservation: the day it shows on, its time, and its user, as in its row."""
+
+    # "Tue 20. 10."
+    day: str
+    start: str
+    end: str
+    runs_in: bool
+    user_name: str
+
+
+@dataclass(frozen=True)
 class HeadsUp:
-    """One heads-up rule that matched, with one line per matching reservation: "Tue 20. 10. 13:00 to 14:30, Jana Smyslena"."""
+    """One heads-up rule that matched, with its reservations."""
 
     title: str
-    items: list[str]
+    items: list[HeadsUpItem]
 
 
 @dataclass(frozen=True)
@@ -103,7 +124,11 @@ class BriefContent:
 
 
 def brief_content(
-    instrument: Instrument, week: Week, reservations: list[Reservation], built_at: datetime
+    instrument: Instrument,
+    week: Week,
+    reservations: list[Reservation],
+    built_at: datetime,
+    working_hours: WorkingHours,
 ) -> BriefContent:
     """`built_at` must carry a time zone; the footer shows it in Prague time."""
     if built_at.tzinfo is None:
@@ -117,7 +142,8 @@ def brief_content(
         week_line=f"{instrument.alias} - Monday {_day_month(week.monday)} to Sunday {_day_month(week.sunday)} {week.sunday.year}",
         counts=_counts(week, reservations) if reservations else [],
         heads_ups=[
-            HeadsUp(match.title, [_heads_up_item(r, week) for r in match.reservations]) for match in heads_ups(reservations)
+            HeadsUp(match.title, [_heads_up_item(r, week) for r in match.reservations])
+            for match in heads_up_matches(reservations, working_hours)
         ],
         days=_days(week, reservations) if reservations else [],
         built=f"Built on {day_name(built_local.date())} {_day_month(built_local.date())} {built_local.year} at {built_local:%H:%M}.",
@@ -129,7 +155,7 @@ def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
 
     Hours count only inside the week, for a reservation that runs in from the previous week or past Sunday.
     """
-    active = [r for r in reservations if r.status is not ReservationStatus.CANCELLED]
+    active = [r for r in reservations if r.will_happen]
     cancelled = len(reservations) - len(active)
     requested = sum(1 for r in active if r.status is ReservationStatus.REQUESTED)
     hours = sum(week.time_inside(r).total_seconds() for r in active) / 3600
@@ -147,11 +173,10 @@ def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
     ]
 
 
-def _heads_up_item(reservation: Reservation, week: Week) -> str:
-    """The day the reservation shows on, its time, and its user, as in its row."""
+def _heads_up_item(reservation: Reservation, week: Week) -> HeadsUpItem:
     day = _shown_on(reservation, week)
     row = _row(reservation, day)
-    return f"{_short_day_name(day)} {_day_month(day)} {time_span(row.start, row.end, row.runs_in)}, {row.user_name}"
+    return HeadsUpItem(f"{_short_day_name(day)} {_day_month(day)}", row.start, row.end, row.runs_in, row.user_name)
 
 
 def _shown_on(reservation: Reservation, week: Week) -> date:

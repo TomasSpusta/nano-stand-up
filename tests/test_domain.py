@@ -1,8 +1,8 @@
-from datetime import date, timedelta
+from datetime import date, time, timedelta
 
 import pytest
 
-from nano_standup.domain import Week
+from nano_standup.domain import Week, WorkingHours
 
 from helpers import reservation
 
@@ -49,3 +49,9 @@ def test_a_week_holds_a_reservation_with_any_time_inside_it(start: str, end: str
 )
 def test_time_inside_a_week_leaves_out_time_before_monday_and_after_sunday(start: str, end: str, hours: int) -> None:
     assert WEEK.time_inside(reservation(start, end)) == timedelta(hours=hours)
+
+
+@pytest.mark.parametrize(("start", "end"), [(time(19, 0), time(7, 0)), (time(7, 0), time(7, 0))])
+def test_a_working_day_must_start_before_it_ends(start: time, end: time) -> None:
+    with pytest.raises(ValueError, match="Working day must start before it ends"):
+        WorkingHours(start, end)
