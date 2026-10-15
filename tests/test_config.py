@@ -53,7 +53,7 @@ def test_environment_wins_over_the_file(tmp_path: Path) -> None:
 
 
 def test_a_missing_setting_is_named(tmp_path: Path) -> None:
-    text = FULL.replace("BOOKING_API_KEY=\"test-key\"\n", "")
+    text = FULL.replace('BOOKING_API_KEY="test-key"\n', "")
 
     with pytest.raises(ConfigError, match="BOOKING_API_KEY"):
         load_settings(write(tmp_path, text), environ={})

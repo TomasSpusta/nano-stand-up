@@ -239,5 +239,5 @@ def _local_time(item: dict[str, Any], key: str, what: str) -> datetime:  # Any: 
 
 
 def _person_name(person: dict[str, Any]) -> str:  # Any: parsed JSON.
-    """"First Last". The booking system's full name is "Last, First"."""
+    """The name as "First Last". The booking system's full name is "Last, First"."""
     return f"{person.get('firstname') or ''} {person.get('lastname') or ''}".strip()

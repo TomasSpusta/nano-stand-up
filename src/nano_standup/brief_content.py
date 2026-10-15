@@ -52,7 +52,9 @@ class TimeSpan:
     runs_in: bool
 
     def text(self, keep_together: Callable[[str], str] = lambda part: part) -> str:
-        """"15:00 to Tue 13:00", or "from Sun 22:00 to 06:00" when the reservation runs in from the previous week.
+        """The span as "15:00 to Tue 13:00".
+
+        It is "from Sun 22:00 to 06:00" when the reservation runs in from the previous week.
 
         `keep_together` wraps the start and the end, so the HTML version can keep each day and time on one line.
         """
@@ -245,7 +247,9 @@ def _comparable(text: str) -> str:
 
 
 def _time_seen_from(moment: datetime, day: date) -> str:
-    """"11:00" on `day`. On another day it shows the day, "Tue 13:00", and the date too when a week or more away.
+    """The time as "11:00" on `day`.
+
+    On another day it shows the day, "Tue 13:00", and the date too when a week or more away.
 
     The date has the year when it is not the year of `day`: "Thu 4. 1. 2024 09:00".
     """
@@ -275,7 +279,7 @@ def _format_hours(value: float) -> str:
 
 
 def _week_span(week: Week) -> str:
-    """"19.-25. 10. 2026", or "28. 9.-4. 10. 2026" when the week spans two months."""
+    """The week as "19.-25. 10. 2026", or "28. 9.-4. 10. 2026" when the week spans two months."""
     monday, sunday = week.monday, week.sunday
     if monday.year != sunday.year:
         return f"{_day_month_year(monday)}-{_day_month_year(sunday)}"

@@ -14,7 +14,9 @@ API_KEY = "test-key"
 
 class LocalBookingServer:
     def __init__(
-        self, instruments: dict[str, Any], login_answer: dict[str, Any]  # Any: mirrors the API's JSON.
+        self,
+        instruments: dict[str, Any],  # Any: mirrors the API's JSON.
+        login_answer: dict[str, Any],  # Any: mirrors the API's JSON.
     ) -> None:
         self.instruments = instruments
         self.login_answer = login_answer
@@ -25,7 +27,8 @@ class LocalBookingServer:
 
 @contextmanager
 def local_booking_server(
-    instruments: dict[str, Any], login_answer: dict[str, Any] | None = None  # Any: mirrors the API's JSON.
+    instruments: dict[str, Any],  # Any: mirrors the API's JSON.
+    login_answer: dict[str, Any] | None = None,  # Any: mirrors the API's JSON.
 ) -> Iterator[LocalBookingServer]:
     """`login_answer` replaces the normal login answer, which holds the access token."""
     state = LocalBookingServer(instruments, {"accessToken": TOKEN} if login_answer is None else login_answer)
