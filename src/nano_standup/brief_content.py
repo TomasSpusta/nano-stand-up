@@ -13,7 +13,7 @@ from nano_standup.domain import (
     UserFacts,
     Week,
 )
-from nano_standup.formatting import day_month, day_month_year, day_name
+from nano_standup.formatting import day_month, day_month_year, day_name, plural
 from nano_standup.heads_ups import WAITING_FOR_APPROVAL, Finding, HeadsUpRule, HeadsUpSettings, heads_up_rules
 
 NO_EXPERIMENT_PLAN = "No experiment plan given"
@@ -194,9 +194,9 @@ def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
     # Shown only when there is something to approve, and first, because it asks the guarantor to act.
     waiting_counts = [Count(str(waiting), WAITING_FOR_APPROVAL.title.lower(), needs_action=True)] if waiting else []
     return waiting_counts + [
-        Count(str(len(not_cancelled)), _plural(len(not_cancelled), "reservation")),
+        Count(str(len(not_cancelled)), plural(len(not_cancelled), "reservation")),
         Count(f"{_format_hours(hours)} h", "booked"),
-        Count(str(users), _plural(users, "user")),
+        Count(str(users), plural(users, "user")),
         Count(str(without_experiment_plan), "without an experiment plan"),
         Count(str(cancelled), "cancelled"),
     ]
@@ -306,10 +306,6 @@ def _length(reservation: Reservation) -> str:
     if minutes < 60:
         return f"{minutes} min"
     return f"{_format_hours(minutes / 60)} h"
-
-
-def _plural(count: int, word: str) -> str:
-    return word if count == 1 else f"{word}s"
 
 
 def _format_hours(value: float) -> str:

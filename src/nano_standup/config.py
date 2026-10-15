@@ -25,6 +25,8 @@ class Settings:
     booking_api_key: str
     smtp: SmtpSettings
     mail_from: str
+    # Gets the error report when briefs still fail at the retry deadline.
+    service_admin_email: str
     database_path: Path
     # The limits of the heads-up rules, such as the working hours.
     heads_up: HeadsUpSettings
@@ -84,6 +86,7 @@ def load_settings(path: Path, environ: Mapping[str, str]) -> Settings:
             starttls=starttls_text == "true",
         ),
         mail_from=required("MAIL_FROM"),
+        service_admin_email=required("SERVICE_ADMIN_EMAIL"),
         database_path=path.parent / required("DATABASE_PATH"),
         heads_up=HeadsUpSettings(working_hours=working_hours, new_user_reservations=int(new_user_text)),
     )

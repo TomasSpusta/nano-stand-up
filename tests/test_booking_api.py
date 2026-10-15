@@ -9,6 +9,7 @@ from nano_standup.booking_api import (
     REQUESTED_STATUS,
     RESERVED_STATUS,
     ApiBookingSource,
+    BookingAccessDenied,
     BookingDataError,
 )
 from nano_standup.booking_source import InstrumentNotFound
@@ -57,6 +58,13 @@ def test_get_instrument_uses_the_czech_name_when_there_is_no_english_one(api: Fa
 def test_get_instrument_raises_instrument_not_found_for_an_unknown_id(api: FakeBookingApi) -> None:
     with pytest.raises(InstrumentNotFound, match="no-such-id"):
         ApiBookingSource(api).get_instrument("no-such-id")
+
+
+def test_get_instrument_raises_booking_access_denied_when_the_api_key_has_no_access(api: FakeBookingApi) -> None:
+    api.forbidden.add(SEM)
+
+    with pytest.raises(BookingAccessDenied, match=f"No access to instrument '{SEM}'.*HTTP 403"):
+        ApiBookingSource(api).get_instrument(SEM)
 
 
 def test_get_instrument_refuses_an_instrument_without_a_guarantor_email(api: FakeBookingApi) -> None:

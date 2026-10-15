@@ -15,6 +15,7 @@ BOOKING_API_KEY="test-key"
 SMTP_HOST=localhost
 SMTP_PORT=1025
 MAIL_FROM=standup@example.org
+SERVICE_ADMIN_EMAIL=service-admin@example.org
 DATABASE_PATH=data/standup.sqlite3
 """
 
@@ -32,6 +33,7 @@ def test_reads_all_settings_from_the_file(tmp_path: Path) -> None:
     assert settings.booking_api_key == "test-key"
     assert settings.smtp == SmtpSettings(host="localhost", port=1025, username=None, password=None, starttls=False)
     assert settings.mail_from == "standup@example.org"
+    assert settings.service_admin_email == "service-admin@example.org"
     assert settings.database_path == tmp_path / "data/standup.sqlite3"
     # Left out of the file, so the defaults.
     assert settings.heads_up == HeadsUpSettings(WorkingHours(time(7, 0), time(19, 0)), new_user_reservations=3)
@@ -51,6 +53,13 @@ def test_environment_wins_over_the_file(tmp_path: Path) -> None:
     settings = load_settings(write(tmp_path, FULL), environ={"SMTP_HOST": "mail.example.org"})
 
     assert settings.smtp.host == "mail.example.org"
+
+
+def test_a_missing_service_admin_email_is_named(tmp_path: Path) -> None:
+    text = FULL.replace("SERVICE_ADMIN_EMAIL=service-admin@example.org\n", "")
+
+    with pytest.raises(ConfigError, match="SERVICE_ADMIN_EMAIL"):
+        load_settings(write(tmp_path, text), environ={})
 
 
 def test_a_missing_setting_is_named(tmp_path: Path) -> None:
