@@ -48,6 +48,8 @@ _SCHEMA = [
     # One unsubscribe link per brief, for the subscription the brief went to. Only a hash of the token is kept.
     # A link does not expire, because a brief may be read weeks later. `used_at` is set on every link of the
     # subscription when it ends, so no old link can end a later subscription to the same instrument.
+    # Used rows are kept, so an old link still says "Already unsubscribed". The table grows by one row per brief,
+    # a few thousand rows a year, which SQLite handles with ease.
     """
     CREATE TABLE IF NOT EXISTS unsubscribe_link (
         token_hash TEXT PRIMARY KEY,
@@ -102,7 +104,8 @@ class UnsubscribeOutcome(Enum):
 @dataclass(frozen=True)
 class UnsubscribeResult:
     outcome: UnsubscribeOutcome
-    # The subscription that ended when the outcome is UNSUBSCRIBED, otherwise None.
+    # The subscription that ended when the outcome is UNSUBSCRIBED, or that would end when it is READY.
+    # Otherwise None.
     subscription: Subscription | None = None
 
 
@@ -178,7 +181,7 @@ class SubscriptionStore:
         return ConfirmResult(ConfirmOutcome.CONFIRMED, subscription)
 
     def unsubscribe_token(self, subscription: Subscription, now: datetime) -> str:
-        """A new token for the unsubscribe link in one brief of the subscription. It is not stored."""
+        """A new token for the unsubscribe link in one brief of the subscription. Only its hash is stored."""
         token = secrets.token_urlsafe(TOKEN_BYTES)
         with closing(self._connect()) as db, db:
             db.execute(
@@ -190,15 +193,15 @@ class SubscriptionStore:
     def check_unsubscribe(self, token: str) -> UnsubscribeOutcome:
         """What `unsubscribe` would do with the token, without using it: READY, ALREADY_UNSUBSCRIBED, or UNKNOWN."""
         with closing(self._connect()) as db:
-            found = _unsubscribe_link_subscription(db, token)
-        return found if isinstance(found, UnsubscribeOutcome) else UnsubscribeOutcome.READY
+            return _check_unsubscribe_link(db, token).outcome
 
     def unsubscribe(self, token: str, now: datetime) -> UnsubscribeResult:
         """End the subscription the token's link is for, and only that one."""
         with closing(self._connect()) as db, db:
-            subscription = _unsubscribe_link_subscription(db, token)
-            if isinstance(subscription, UnsubscribeOutcome):
-                return UnsubscribeResult(subscription)
+            checked = _check_unsubscribe_link(db, token)
+            subscription = checked.subscription
+            if checked.outcome is not UnsubscribeOutcome.READY or subscription is None:
+                return UnsubscribeResult(checked.outcome)
             if not _end(db, subscription, now):
                 # Another request ended it at the same moment.
                 return UnsubscribeResult(UnsubscribeOutcome.ALREADY_UNSUBSCRIBED)
@@ -244,21 +247,21 @@ def _activate(db: sqlite3.Connection, subscription: Subscription, now: datetime)
     )
 
 
-def _unsubscribe_link_subscription(db: sqlite3.Connection, token: str) -> Subscription | UnsubscribeOutcome:
-    """The active subscription the link would end, or why it cannot end one."""
+def _check_unsubscribe_link(db: sqlite3.Connection, token: str) -> UnsubscribeResult:
+    """READY with the active subscription the link would end, or why it cannot end one."""
     row: tuple[str, str, str | None] | None = db.execute(
         "SELECT instrument_id, email, used_at FROM unsubscribe_link WHERE token_hash = ?", (_hash(token),)
     ).fetchone()
     if row is None:
-        return UnsubscribeOutcome.UNKNOWN
+        return UnsubscribeResult(UnsubscribeOutcome.UNKNOWN)
     instrument_id, email, used_at = row
     active = db.execute(
         "SELECT 1 FROM subscription WHERE instrument_id = ? AND email = ? AND status = 'active'",
         (instrument_id, email),
     ).fetchone()
     if used_at is not None or active is None:
-        return UnsubscribeOutcome.ALREADY_UNSUBSCRIBED
-    return Subscription(instrument_id, email)
+        return UnsubscribeResult(UnsubscribeOutcome.ALREADY_UNSUBSCRIBED)
+    return UnsubscribeResult(UnsubscribeOutcome.READY, Subscription(instrument_id, email))
 
 
 def _end(db: sqlite3.Connection, subscription: Subscription, now: datetime) -> bool:
