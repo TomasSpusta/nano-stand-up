@@ -69,6 +69,11 @@ class InstrumentName:
     alias: str
 
 
+def name_repeats_alias(instrument: Instrument | InstrumentName) -> bool:
+    """True for an instrument whose name only repeats its alias, such as "TEST-RFID4", so it is shown once."""
+    return instrument.name.strip().casefold() == instrument.alias.strip().casefold()
+
+
 class ReservationStatus(Enum):
     RESERVED = "reserved"
     # Waiting for the guarantor to approve it, so it may not happen.

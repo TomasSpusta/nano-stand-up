@@ -4,7 +4,7 @@ from datetime import timedelta
 from html import escape
 from typing import assert_never
 
-from nano_standup.domain import InstrumentName
+from nano_standup.domain import InstrumentName, name_repeats_alias
 from nano_standup.subscriptions import ConfirmLinkProblem, UnsubscribeLinkProblem
 
 STYLE = (
@@ -18,13 +18,13 @@ STYLE = (
     ".problem{color:#b91c1c}"
 )
 FORM_PROBLEM = "Pick an instrument and enter your email."
+# Relative, so it also works when a proxy serves the app under a path. All pages are at the top level of the app.
+SUBSCRIBE_LINK = '<p><a href="./">Subscribe again</a></p>'
 
 
 def form_page(instruments: list[InstrumentName], problem: str = "") -> str:
     """The page where a guarantor picks an instrument and enters their email."""
-    options = "".join(
-        f'<option value="{escape(i.id)}">{escape(i.alias)} - {escape(i.name)}</option>' for i in instruments
-    )
+    options = "".join(f'<option value="{escape(i.id)}">{escape(_picker_label(i))}</option>' for i in instruments)
     problem_html = f'<p class="problem">{escape(problem)}</p>' if problem else ""
     return _page(
         "Nano Stand-up brief",
@@ -41,12 +41,19 @@ def form_page(instruments: list[InstrumentName], problem: str = "") -> str:
     )
 
 
+def _picker_label(instrument: InstrumentName) -> str:
+    """Alias and name, or the alias alone when the name only repeats it."""
+    if name_repeats_alias(instrument):
+        return instrument.alias
+    return f"{instrument.alias} - {instrument.name}"
+
+
 def requested_page(confirm_link_lifetime: timedelta) -> str:
     """The same page whether or not the email matched, so it does not show who is whose guarantor."""
     hours = round(confirm_link_lifetime / timedelta(hours=1))
     lines = (
         "If this email is the instrument's guarantor email in the booking system, a confirm link is on its way to it.",
-        f"Your subscription starts when you open that link. It works once, within {hours} hours.",
+        f"Your subscription starts when you open that link and press Confirm. It works once, within {hours} hours.",
         "No email after a few minutes? Check that you entered the email the booking system has for you.",
     )
     return _page("Check your email", "".join(f"<p>{escape(line)}</p>" for line in lines))
@@ -77,7 +84,8 @@ def not_the_guarantor_page() -> str:
         "Subscription not started",
         "<p>This email is no longer the instrument's guarantor email in the booking system,"
         " so the subscription did not start.</p>"
-        "<p>If you are the guarantor, check the email the booking system has for you and subscribe again.</p>",
+        "<p>If you are the guarantor, check the email the booking system has for you and subscribe again.</p>"
+        + SUBSCRIBE_LINK,
     )
 
 
@@ -91,7 +99,8 @@ def confirm_unavailable_page() -> str:
 
 def confirm_problem_page(problem: ConfirmLinkProblem) -> str:
     """Why the confirm link cannot be used."""
-    return _message_page(*_confirm_problem_message(problem))
+    # Each of them says to subscribe again.
+    return _message_page(*_confirm_problem_message(problem), subscribe_link=True)
 
 
 def _confirm_problem_message(problem: ConfirmLinkProblem) -> tuple[str, str]:
@@ -133,12 +142,15 @@ def unsubscribed_page() -> str:
     return _message_page(
         "Unsubscribed",
         "You are unsubscribed. No more of these weekly briefs will come. To get them again, subscribe again.",
+        subscribe_link=True,
     )
 
 
 def unsubscribe_problem_page(problem: UnsubscribeLinkProblem) -> str:
     """Why the unsubscribe link cannot end a subscription."""
-    return _message_page(*_unsubscribe_problem_message(problem))
+    return _message_page(
+        *_unsubscribe_problem_message(problem), subscribe_link=problem is UnsubscribeLinkProblem.GUARANTOR_CHANGED
+    )
 
 
 def _unsubscribe_problem_message(problem: UnsubscribeLinkProblem) -> tuple[str, str]:
@@ -167,6 +179,11 @@ def _unsubscribe_problem_message(problem: UnsubscribeLinkProblem) -> tuple[str, 
             assert_never(problem)
 
 
+def error_page() -> str:
+    """For an error nobody expected. The service admin finds it in the log."""
+    return _page("Something went wrong", "<p>This page has a problem right now. Please try again in a few minutes.</p>")
+
+
 def unavailable_page() -> str:
     return _page(
         "Please try again later",
@@ -174,8 +191,9 @@ def unavailable_page() -> str:
     )
 
 
-def _message_page(title: str, text: str) -> str:
-    return _page(title, f"<p>{escape(text)}</p>")
+def _message_page(title: str, text: str, subscribe_link: bool = False) -> str:
+    """A page with one message. `subscribe_link` for a message that says to subscribe again."""
+    return _page(title, f"<p>{escape(text)}</p>{SUBSCRIBE_LINK if subscribe_link else ''}")
 
 
 def _page(title: str, body: str) -> str:

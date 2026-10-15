@@ -16,6 +16,7 @@ from nano_standup.domain import (
     Instrument,
     InstrumentName,
     NotTheGuarantor,
+    name_repeats_alias,
     require_guarantor,
 )
 from nano_standup.formatting import day_month_year, day_name
@@ -125,11 +126,18 @@ class SubscriptionRequests:
         return ended
 
 
+def _names(instrument: Instrument) -> str:
+    """Name and alias, or the alias alone when the name only repeats it."""
+    if name_repeats_alias(instrument):
+        return instrument.alias
+    return f"{instrument.name} ({instrument.alias})"
+
+
 def _confirm_mail(instrument: Instrument, link: str, expires_at: datetime, from_address: str) -> Message:
     expires = expires_at.astimezone(PRAGUE)
     until = f"{day_name(expires.date())} {day_month_year(expires.date())} at {expires:%H:%M}"
     lines = [
-        f"Someone asked for the weekly Nano Stand-up brief for {instrument.name} ({instrument.alias}).",
+        f"Someone asked for the weekly Nano Stand-up brief for {_names(instrument)}.",
         "It goes to this address because the booking system lists it as the instrument's guarantor email.",
         "To start getting the brief every Monday, open this link and press Confirm:",
         link,

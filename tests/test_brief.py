@@ -46,6 +46,33 @@ def test_subject_and_heading_name_the_instrument_and_the_week() -> None:
     assert "TEST-SEM - Monday 19. 10. to Sunday 25. 10. 2026" in text
 
 
+def test_the_week_line_leaves_out_the_alias_when_it_is_the_name() -> None:
+    instrument = replace(INSTRUMENT, name="TEST-RFID", alias="TEST-RFID")
+
+    brief = build_brief(instrument, WEEK, [], {}, BUILT_AT, HEADS_UP_SETTINGS, UNSUBSCRIBE_LINK)
+
+    assert "TEST-RFID Monday 19. 10. to Sunday 25. 10. 2026" in visible_text(brief.html)
+    assert "TEST-RFID - Monday" not in visible_text(brief.html)
+    assert "TEST-RFID - Monday" not in brief.text
+
+
+def test_hours_booked_under_an_hour_show_in_minutes() -> None:
+    reservations = [reservation("2026-10-19T09:33", "2026-10-19T09:46")]
+
+    text = visible_text(_build(reservations).html)
+
+    assert "13 min booked" in text
+
+
+def test_a_reservation_of_no_time_shows_as_0_min() -> None:
+    reservations = [reservation("2026-10-19T09:00", "2026-10-19T09:00")]
+
+    text = visible_text(_build(reservations).html)
+
+    assert "09:00 to 09:00 0 min" in text
+    assert "0 h booked" in text
+
+
 def test_counts_show_reservations_hours_users_and_reservations_without_an_experiment_plan() -> None:
     reservations = [
         reservation("2026-10-19T09:00", "2026-10-19T12:00", user_name="Petr Vymysleny"),
