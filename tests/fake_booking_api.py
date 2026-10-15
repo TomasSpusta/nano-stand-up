@@ -26,6 +26,8 @@ class FakeBookingApi:
         self.instruments: dict[str, dict[str, Any]] = {}  # Any: mirrors the API's JSON.
         self.reservations: list[dict[str, Any]] = []  # Any: mirrors the API's JSON.
         self.recordings: list[dict[str, Any]] = []  # Any: mirrors the API's JSON.
+        # How many recordings the pages of /api/recording held, to check that reads stay small.
+        self.recordings_read = 0
 
     def get(self, path: str, params: Params) -> Any:  # Any: mirrors the JSON shape of the real API.
         if path.startswith("/api/equipment/"):
@@ -36,7 +38,7 @@ class FakeBookingApi:
         if path == "/api/service-appointment":
             if LIST_SCOPES_THAT_FAIL & set(str(params.get("scope", "")).split(",")):
                 raise BookingApiError(path, 500, "Internal Server Error")
-            listed = self._page(path, self.reservations, params, "scheduledstart")
+            listed = self._page(path, self.reservations, params, {"scheduledstart", "scheduledend"})
             return [{k: v for k, v in x.items() if k != "ge_realised_for_contactid"} for x in listed]
         if path.startswith("/api/service-appointment/"):
             reservation_id = path.removeprefix("/api/service-appointment/")
@@ -45,24 +47,29 @@ class FakeBookingApi:
                     return {k: v for k, v in item.items() if k != "activity_parties"}
             raise BookingApiError(path, 404, "Not Found")
         if path == "/api/recording":
-            return self._page(path, self.recordings, params, "new_start")
+            page = self._page(path, self.recordings, params, {"new_start"})
+            self.recordings_read += len(page)
+            return page
         raise BookingApiError(path, 404, "Not Found")
 
-    def _page(self, path: str, items: list[dict[str, Any]], params: Params, time_field: str) -> list[dict[str, Any]]:  # Any: JSON.
+    def _page(self, path: str, items: list[dict[str, Any]], params: Params, time_fields: set[str]) -> list[dict[str, Any]]:  # Any: JSON.
         limit = int(str(params.get("limit", 20)))
         if limit > MAX_PAGE_SIZE:
             raise BookingApiError(path, 500, "Internal Server Error")
         page = int(str(params.get("page", 1)))
         filters = params.get("filters[]", [])
-        matching = [x for x in items if _matches(x, filters if isinstance(filters, list) else [str(filters)], time_field)]
+        matching = [x for x in items if _matches(x, filters if isinstance(filters, list) else [str(filters)], time_fields)]
         return matching[(page - 1) * limit : page * limit]
 
 
-def _matches(item: dict[str, Any], filters: list[str], time_field: str) -> bool:  # Any: mirrors the API's JSON.
+def _matches(item: dict[str, Any], filters: list[str], time_fields: set[str]) -> bool:  # Any: mirrors the API's JSON.
     for f in filters:
         column, operator, value = f.split(":", 2)
-        if column != time_field:
+        if column not in time_fields:
             raise AssertionError(f"FakeBookingApi does not support filter {f!r}")
+        # A row with no value in the column never matches a lt or gt filter.
+        if item.get(column) is None:
+            return False
         if operator == "gt" and not item[column] > value:
             return False
         if operator == "lt" and not item[column] < value:

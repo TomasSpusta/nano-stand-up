@@ -2,9 +2,12 @@ Weekly brief for Hana Testova
 Test Electron Microscope
 TEST-SEM - Monday 19. 10. to Sunday 25. 10. 2026
 
-2 waiting for your approval, 4 reservations, 241.2 h booked, 3 users, 1 without an experiment plan, 1 cancelled
+2 waiting for your approval, 5 reservations, 69.2 h booked, 3 users, 1 without an experiment plan, 1 cancelled
 
 MONDAY 19. 10.
+  from Sun 22:00 to 06:00 (8 h)
+    Jana Smyslena, 2026-000001/RG-1-01
+    Overnight EDS mapping
   08:30 to 11:00 (2.5 h)
     Petr Vymysleny, 2026-000001/RG-1-01
     Imaging of samples

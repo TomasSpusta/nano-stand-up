@@ -18,7 +18,7 @@ class BookingSource(Protocol):
         ...
 
     def get_reservations(self, instrument_id: str, week: Week) -> list[Reservation]:
-        """The reservations on the instrument that start inside the week."""
+        """The reservations on the instrument that are inside the week, even only in part."""
         ...
 
 
@@ -38,4 +38,4 @@ class FakeBookingSource:
             raise InstrumentNotFound(f"No instrument with id {instrument_id!r}") from None
 
     def get_reservations(self, instrument_id: str, week: Week) -> list[Reservation]:
-        return [r for r in self._reservations.get(instrument_id, []) if week.start <= r.start < week.end]
+        return [r for r in self._reservations.get(instrument_id, []) if week.overlaps(r)]

@@ -115,8 +115,8 @@ def _row_html(row: Row) -> str:
         if style.highlighted
         else ("", "")
     )
-    # A narrow column may break the time span only after "to", never inside "Wed 13:00".
-    span = time_span(row.start, row.end.replace(" ", "&nbsp;"))
+    # A narrow column may break the time span only around "from" and "to", never inside "Wed 13:00".
+    span = time_span(row.start.replace(" ", "&nbsp;"), row.end.replace(" ", "&nbsp;"), row.runs_in)
     mark = (
         f'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:{style.mark_color};">{row.mark}</div>'
         if row.mark

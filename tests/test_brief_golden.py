@@ -22,6 +22,7 @@ BUILT_AT = datetime(2026, 10, 19, 8, 0, tzinfo=ZoneInfo("Europe/Prague"))
 
 # One of each thing a brief can show.
 FULL_WEEK = [
+    reservation("2026-10-18T22:00", "2026-10-19T06:00", user_name="Jana Smyslena", experiment_plan="Overnight EDS mapping"),
     reservation("2026-10-19T08:30", "2026-10-19T11:00", user_name="Petr Vymysleny", note="Bring own holder"),
     reservation(
         "2026-10-19T14:00",
