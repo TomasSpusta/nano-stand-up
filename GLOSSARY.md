@@ -17,6 +17,7 @@ The weekly message one guarantor gets about one instrument, listing the reservat
 A reservation that runs in from the previous week shows on Monday, and it counts only its hours inside the week.
 It shows the reservations as they were when it was built on Monday morning.
 It is sent even when the week has no reservations.
+It ends with an unsubscribe link that ends its subscription only.
 _Avoid_: Stand-up, report, newsletter
 
 **Service admin**:
@@ -26,7 +27,7 @@ _Avoid_: Admin, operator, maintainer
 **Subscription**:
 A guarantor's confirmed request to get the brief for one instrument.
 It is active only after the guarantor clicks the confirm link sent to their booking-system email.
-It ends when that person is no longer the instrument's guarantor.
+It ends when that person is no longer the instrument's guarantor, or when they use the unsubscribe link in one of its briefs.
 _Avoid_: Sign-up, registration, newsletter
 
 **Reservation list**:

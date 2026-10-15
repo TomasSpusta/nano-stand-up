@@ -68,6 +68,7 @@ uv run nano-standup run-monday-job
 ```
 
 Read them at http://localhost:8025.
+The Monday job needs `PUBLIC_BASE_URL` too (see below), because each brief has an unsubscribe link that starts with it.
 
 ### Web app
 
@@ -77,8 +78,14 @@ When the email is the instrument's guarantor email in the booking system, a conf
 The subscription starts when they open the link and press Confirm.
 Opening the link alone does not use it, because mail scanners open links too.
 
+Each brief ends with an unsubscribe link for its subscription.
+Opening it shows an Unsubscribe button, and pressing it ends that subscription only.
+The guarantor's other subscriptions keep going.
+Each brief gets a new link, and every link of a subscription works until the subscription ends, with no time limit.
+The brief also carries the `List-Unsubscribe` and `List-Unsubscribe-Post` mail headers (RFC 8058), so mail apps can show their own unsubscribe button.
+
 Set `PUBLIC_BASE_URL` in `.env` to the address the page is opened at, for example `http://localhost:8000` when testing.
-Confirm links start with it.
+Confirm and unsubscribe links start with it.
 `WEB_HOST` and `WEB_PORT` (default 127.0.0.1 and 8000) set where the app listens.
 In production it runs behind an HTTPS proxy.
 
