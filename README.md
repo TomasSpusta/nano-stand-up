@@ -75,7 +75,7 @@ The Monday job needs `PUBLIC_BASE_URL` too (see below), because each brief has a
 Guarantors subscribe on a small web page.
 They pick an instrument and enter their email.
 When the email is the instrument's guarantor email in the booking system, a confirm link goes to that email.
-The subscription starts when they open the link and press Confirm.
+The subscription starts when they open the link and press Confirm, if the email is still the guarantor email then.
 Opening the link alone does not use it, because mail scanners open links too.
 
 Each brief ends with an unsubscribe link for its subscription.

@@ -1,4 +1,6 @@
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -7,10 +9,10 @@ import pytest
 
 from nano_standup.subscriptions import (
     CONFIRM_LINK_LIFETIME,
-    ConfirmOutcome,
+    ConfirmLinkProblem,
     Subscription,
     SubscriptionStore,
-    UnsubscribeOutcome,
+    UnsubscribeLinkProblem,
 )
 
 NOW = datetime(2026, 10, 14, 10, 0, tzinfo=UTC)
@@ -31,48 +33,63 @@ def test_a_requested_subscription_is_not_active_before_it_is_confirmed(store: Su
 
 
 def test_confirming_makes_the_subscription_active_with_the_normalized_email(store: SubscriptionStore) -> None:
-    pending = store.request(SEM, "  Hana.Testova@Example.org ", NOW)
+    requested = store.request(SEM, "  Hana.Testova@Example.org ", NOW)
 
-    result = store.confirm(pending.token, NOW + timedelta(minutes=5))
+    result = store.confirm(requested.token, NOW + timedelta(minutes=5))
 
-    assert result.outcome is ConfirmOutcome.CONFIRMED
-    assert result.subscription == Subscription(SEM, EMAIL)
+    assert result == Subscription(SEM, EMAIL)
     assert store.list_active() == [Subscription(SEM, EMAIL)]
 
 
 def test_the_confirm_link_expires_after_its_lifetime(store: SubscriptionStore) -> None:
-    pending = store.request(SEM, EMAIL, NOW)
+    requested = store.request(SEM, EMAIL, NOW)
 
-    assert pending.expires_at == NOW + CONFIRM_LINK_LIFETIME
-    result = store.confirm(pending.token, NOW + CONFIRM_LINK_LIFETIME)
+    assert requested.expires_at == NOW + CONFIRM_LINK_LIFETIME
+    result = store.confirm(requested.token, NOW + CONFIRM_LINK_LIFETIME)
 
-    assert result.outcome is ConfirmOutcome.EXPIRED
-    assert result.subscription is None
+    assert result is ConfirmLinkProblem.EXPIRED
     assert store.list_active() == []
 
 
 def test_the_confirm_link_works_just_before_it_expires(store: SubscriptionStore) -> None:
-    pending = store.request(SEM, EMAIL, NOW)
+    requested = store.request(SEM, EMAIL, NOW)
 
-    result = store.confirm(pending.token, NOW + CONFIRM_LINK_LIFETIME - timedelta(seconds=1))
+    result = store.confirm(requested.token, NOW + CONFIRM_LINK_LIFETIME - timedelta(seconds=1))
 
-    assert result.outcome is ConfirmOutcome.CONFIRMED
+    assert result == Subscription(SEM, EMAIL)
 
 
 def test_the_confirm_link_works_only_once(store: SubscriptionStore) -> None:
-    pending = store.request(SEM, EMAIL, NOW)
-    store.confirm(pending.token, NOW)
+    requested = store.request(SEM, EMAIL, NOW)
+    store.confirm(requested.token, NOW)
 
-    result = store.confirm(pending.token, NOW)
+    result = store.confirm(requested.token, NOW)
 
-    assert result.outcome is ConfirmOutcome.USED
-    assert result.subscription is None
+    assert result is ConfirmLinkProblem.USED
+
+
+def test_two_confirms_of_one_token_at_the_same_moment_activate_it_once(tmp_path: Path) -> None:
+    # Two stores on one file, like two web requests in their own threads, such as a double click on Confirm.
+    path = tmp_path / "standup.sqlite3"
+    stores = [SubscriptionStore(path), SubscriptionStore(path)]
+    requested = stores[0].request(SEM, EMAIL, NOW)
+    start = threading.Barrier(len(stores))
+
+    def confirm(store: SubscriptionStore) -> Subscription | ConfirmLinkProblem:
+        start.wait(timeout=5)
+        return store.confirm(requested.token, NOW)
+
+    with ThreadPoolExecutor(len(stores)) as pool:
+        results = list(pool.map(confirm, stores))
+
+    assert sorted(results, key=str) == [ConfirmLinkProblem.USED, Subscription(SEM, EMAIL)]
+    assert stores[0].list_active() == [Subscription(SEM, EMAIL)]
 
 
 def test_an_unknown_token_is_refused(store: SubscriptionStore) -> None:
     result = store.confirm("no-such-token", NOW)
 
-    assert result.outcome is ConfirmOutcome.UNKNOWN
+    assert result is ConfirmLinkProblem.UNKNOWN
     assert store.list_active() == []
 
 
@@ -105,12 +122,12 @@ def test_one_guarantor_subscribes_to_each_instrument_on_its_own(store: Subscript
 
 def test_the_database_keeps_only_a_hash_of_the_token(tmp_path: Path) -> None:
     path = tmp_path / "standup.sqlite3"
-    pending = SubscriptionStore(path).request(SEM, EMAIL, NOW)
+    requested = SubscriptionStore(path).request(SEM, EMAIL, NOW)
 
     with closing(sqlite3.connect(path)) as db:
         dump = "\n".join(db.iterdump())
 
-    assert pending.token not in dump
+    assert requested.token not in dump
 
 
 def test_opens_a_database_made_before_confirm_links_existed(tmp_path: Path) -> None:
@@ -127,19 +144,19 @@ def test_opens_a_database_made_before_confirm_links_existed(tmp_path: Path) -> N
         )
 
     store = SubscriptionStore(path)
-    pending = store.request(SEM, EMAIL, NOW)
-    store.confirm(pending.token, NOW)
+    requested = store.request(SEM, EMAIL, NOW)
+    store.confirm(requested.token, NOW)
 
     assert store.list_active() == [Subscription(LAB, EMAIL), Subscription(SEM, EMAIL)]
 
 
 def test_checking_a_link_does_not_use_it(store: SubscriptionStore) -> None:
-    pending = store.request(SEM, EMAIL, NOW)
+    requested = store.request(SEM, EMAIL, NOW)
 
-    assert store.check(pending.token, NOW) is ConfirmOutcome.READY
-    assert store.check(pending.token, NOW) is ConfirmOutcome.READY
+    assert store.check(requested.token, NOW) == Subscription(SEM, EMAIL)
+    assert store.check(requested.token, NOW) == Subscription(SEM, EMAIL)
     assert store.list_active() == []
-    assert store.confirm(pending.token, NOW).outcome is ConfirmOutcome.CONFIRMED
+    assert store.confirm(requested.token, NOW) == Subscription(SEM, EMAIL)
 
 
 def test_checking_a_link_tells_expired_used_and_unknown(store: SubscriptionStore) -> None:
@@ -147,18 +164,18 @@ def test_checking_a_link_tells_expired_used_and_unknown(store: SubscriptionStore
     store.confirm(used.token, NOW)
     expired = store.request(LAB, EMAIL, NOW)
 
-    assert store.check(used.token, NOW) is ConfirmOutcome.USED
-    assert store.check(expired.token, NOW + CONFIRM_LINK_LIFETIME) is ConfirmOutcome.EXPIRED
-    assert store.check("no-such-token", NOW) is ConfirmOutcome.UNKNOWN
+    assert store.check(used.token, NOW) is ConfirmLinkProblem.USED
+    assert store.check(expired.token, NOW + CONFIRM_LINK_LIFETIME) is ConfirmLinkProblem.EXPIRED
+    assert store.check("no-such-token", NOW) is ConfirmLinkProblem.UNKNOWN
 
 
 def test_a_recent_request_is_one_still_valid_and_made_since_the_given_time(store: SubscriptionStore) -> None:
-    pending = store.request(SEM, EMAIL, NOW)
+    requested = store.request(SEM, EMAIL, NOW)
 
     assert store.has_recent_request(SEM, since=NOW - timedelta(minutes=5), now=NOW + timedelta(minutes=1))
     assert not store.has_recent_request(SEM, since=NOW + timedelta(seconds=1), now=NOW + timedelta(minutes=1))
     assert not store.has_recent_request(LAB, since=NOW - timedelta(minutes=5), now=NOW)
-    store.confirm(pending.token, NOW)
+    store.confirm(requested.token, NOW)
     assert not store.has_recent_request(SEM, since=NOW - timedelta(minutes=5), now=NOW)
 
 
@@ -178,10 +195,7 @@ def test_unsubscribing_ends_only_that_subscription(store: SubscriptionStore) -> 
     store.add_active(SEM, "ota.zkusebni@example.org", NOW)
     token = store.unsubscribe_token(sem, NOW)
 
-    result = store.unsubscribe(token, NOW)
-
-    assert result.outcome is UnsubscribeOutcome.UNSUBSCRIBED
-    assert result.subscription == sem
+    assert store.unsubscribe(token, NOW) == sem
     assert store.list_active() == [Subscription(LAB, EMAIL), Subscription(SEM, "ota.zkusebni@example.org")]
 
 
@@ -189,10 +203,7 @@ def test_unsubscribing_again_says_already_unsubscribed(store: SubscriptionStore)
     token = store.unsubscribe_token(store.add_active(SEM, EMAIL, NOW), NOW)
     store.unsubscribe(token, NOW)
 
-    result = store.unsubscribe(token, NOW)
-
-    assert result.outcome is UnsubscribeOutcome.ALREADY_UNSUBSCRIBED
-    assert result.subscription is None
+    assert store.unsubscribe(token, NOW) is UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED
 
 
 def test_every_unsubscribe_link_of_a_subscription_works_until_one_is_used(store: SubscriptionStore) -> None:
@@ -202,11 +213,11 @@ def test_every_unsubscribe_link_of_a_subscription_works_until_one_is_used(store:
     new = store.unsubscribe_token(sem, NOW + timedelta(weeks=1))
 
     assert old != new
-    assert store.check_unsubscribe(old) is UnsubscribeOutcome.READY
+    assert store.check_unsubscribe(old) == sem
     store.unsubscribe(new, NOW + timedelta(weeks=8))
 
-    assert store.check_unsubscribe(old) is UnsubscribeOutcome.ALREADY_UNSUBSCRIBED
-    assert store.unsubscribe(old, NOW).outcome is UnsubscribeOutcome.ALREADY_UNSUBSCRIBED
+    assert store.check_unsubscribe(old) is UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED
+    assert store.unsubscribe(old, NOW) is UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED
 
 
 def test_an_unsubscribe_link_from_before_a_new_subscription_does_not_end_it(store: SubscriptionStore) -> None:
@@ -215,9 +226,7 @@ def test_an_unsubscribe_link_from_before_a_new_subscription_does_not_end_it(stor
     store.unsubscribe(store.unsubscribe_token(sem, NOW), NOW)
     store.add_active(SEM, EMAIL, NOW + timedelta(days=1))
 
-    result = store.unsubscribe(old, NOW + timedelta(days=2))
-
-    assert result.outcome is UnsubscribeOutcome.ALREADY_UNSUBSCRIBED
+    assert store.unsubscribe(old, NOW + timedelta(days=2)) is UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED
     assert store.list_active() == [sem]
 
 
@@ -225,16 +234,16 @@ def test_checking_an_unsubscribe_link_does_not_use_it(store: SubscriptionStore) 
     sem = store.add_active(SEM, EMAIL, NOW)
     token = store.unsubscribe_token(sem, NOW)
 
-    assert store.check_unsubscribe(token) is UnsubscribeOutcome.READY
-    assert store.check_unsubscribe(token) is UnsubscribeOutcome.READY
+    assert store.check_unsubscribe(token) == sem
+    assert store.check_unsubscribe(token) == sem
     assert store.list_active() == [sem]
 
 
 def test_an_unknown_unsubscribe_token_is_refused(store: SubscriptionStore) -> None:
     store.add_active(SEM, EMAIL, NOW)
 
-    assert store.check_unsubscribe("no-such-token") is UnsubscribeOutcome.UNKNOWN
-    assert store.unsubscribe("no-such-token", NOW).outcome is UnsubscribeOutcome.UNKNOWN
+    assert store.check_unsubscribe("no-such-token") is UnsubscribeLinkProblem.UNKNOWN
+    assert store.unsubscribe("no-such-token", NOW) is UnsubscribeLinkProblem.UNKNOWN
     assert store.list_active() == [Subscription(SEM, EMAIL)]
 
 

@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 
 from nano_standup.booking_source import FakeBookingSource, InstrumentNotFound
-from nano_standup.service_admin import NotTheGuarantor, add_subscription
+from nano_standup.domain import NotTheGuarantor
+from nano_standup.service_admin import add_subscription
 from nano_standup.subscriptions import Subscription, SubscriptionStore
 
 from helpers import INSTRUMENT

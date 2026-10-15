@@ -2,9 +2,10 @@
 
 from datetime import timedelta
 from html import escape
+from typing import assert_never
 
 from nano_standup.domain import InstrumentName
-from nano_standup.subscriptions import ConfirmOutcome, UnsubscribeOutcome
+from nano_standup.subscriptions import ConfirmLinkProblem, UnsubscribeLinkProblem
 
 STYLE = (
     "body{margin:0;padding:0 1rem;background:#f4f4f5;color:#1a1a1a;line-height:1.5;"
@@ -17,42 +18,6 @@ STYLE = (
     ".problem{color:#b91c1c}"
 )
 FORM_PROBLEM = "Pick an instrument and enter your email."
-CONFIRM_MESSAGES = {
-    ConfirmOutcome.CONFIRMED: (
-        "Subscription confirmed",
-        "Your subscription is active. The brief for this instrument comes every Monday morning.",
-    ),
-    ConfirmOutcome.EXPIRED: (
-        "Link expired",
-        "This confirm link has expired. Subscribe again to get a new one.",
-    ),
-    ConfirmOutcome.USED: (
-        "Link already used",
-        "This confirm link was already used. If it was you, your subscription is active."
-        " To get a new link, subscribe again.",
-    ),
-    ConfirmOutcome.UNKNOWN: (
-        "Link not valid",
-        "This confirm link is not valid. Check that you opened the whole link from the email, or subscribe again.",
-    ),
-}
-
-# Each says nothing about other subscriptions: whoever has the link sees only what the brief already showed.
-UNSUBSCRIBE_MESSAGES = {
-    UnsubscribeOutcome.UNSUBSCRIBED: (
-        "Unsubscribed",
-        "You are unsubscribed. No more of these weekly briefs will come. To get them again, subscribe again.",
-    ),
-    UnsubscribeOutcome.ALREADY_UNSUBSCRIBED: (
-        "Already unsubscribed",
-        "This subscription has already ended, so nothing changed. If you subscribed again since,"
-        " use the unsubscribe link in your latest brief.",
-    ),
-    UnsubscribeOutcome.UNKNOWN: (
-        "Link not valid",
-        "This unsubscribe link is not valid. Check that you opened the whole link from the email.",
-    ),
-}
 
 
 def form_page(instruments: list[InstrumentName], problem: str = "") -> str:
@@ -99,9 +64,55 @@ def confirm_button_page(token: str) -> str:
     )
 
 
-def confirm_page(outcome: ConfirmOutcome) -> str:
-    """The message for an outcome of `SubscriptionStore.confirm` or `check`, other than READY."""
-    return _message_page(*CONFIRM_MESSAGES[outcome])
+def confirmed_page() -> str:
+    return _page(
+        "Subscription confirmed",
+        "<p>Your subscription is active. The brief for this instrument comes every Monday morning.</p>",
+    )
+
+
+def not_the_guarantor_page() -> str:
+    """It does not say who the guarantor is now."""
+    return _page(
+        "Subscription not started",
+        "<p>This email is no longer the instrument's guarantor email in the booking system,"
+        " so the subscription did not start.</p>"
+        "<p>If you are the guarantor, check the email the booking system has for you and subscribe again.</p>",
+    )
+
+
+def confirm_unavailable_page() -> str:
+    return _page(
+        "Please try again later",
+        "<p>Your subscription is not confirmed yet: this page cannot reach the booking system right now.</p>"
+        "<p>Your confirm link still works. Please open it again in a few minutes.</p>",
+    )
+
+
+def confirm_problem_page(problem: ConfirmLinkProblem) -> str:
+    """Why the confirm link cannot be used."""
+    return _message_page(*_confirm_problem_message(problem))
+
+
+def _confirm_problem_message(problem: ConfirmLinkProblem) -> tuple[str, str]:
+    # A match, not a dict, so the type checker fails when a new problem has no message.
+    match problem:
+        case ConfirmLinkProblem.EXPIRED:
+            return "Link expired", "This confirm link has expired. Subscribe again to get a new one."
+        case ConfirmLinkProblem.USED:
+            return (
+                "Link already used",
+                "This confirm link was already used. If it was you, your subscription is active."
+                " To get a new link, subscribe again.",
+            )
+        case ConfirmLinkProblem.UNKNOWN:
+            return (
+                "Link not valid",
+                "This confirm link is not valid."
+                " Check that you opened the whole link from the email, or subscribe again.",
+            )
+        case _:
+            assert_never(problem)
 
 
 def unsubscribe_button_page(token: str) -> str:
@@ -116,9 +127,36 @@ def unsubscribe_button_page(token: str) -> str:
     )
 
 
-def unsubscribe_page(outcome: UnsubscribeOutcome) -> str:
-    """The message for an outcome of `SubscriptionStore.unsubscribe` or `check_unsubscribe`, other than READY."""
-    return _message_page(*UNSUBSCRIBE_MESSAGES[outcome])
+# The unsubscribe pages say nothing about other subscriptions: whoever has the link sees only what the brief
+# already showed.
+def unsubscribed_page() -> str:
+    return _message_page(
+        "Unsubscribed",
+        "You are unsubscribed. No more of these weekly briefs will come. To get them again, subscribe again.",
+    )
+
+
+def unsubscribe_problem_page(problem: UnsubscribeLinkProblem) -> str:
+    """Why the unsubscribe link cannot end a subscription."""
+    return _message_page(*_unsubscribe_problem_message(problem))
+
+
+def _unsubscribe_problem_message(problem: UnsubscribeLinkProblem) -> tuple[str, str]:
+    # A match, not a dict, so the type checker fails when a new problem has no message.
+    match problem:
+        case UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED:
+            return (
+                "Already unsubscribed",
+                "This subscription has already ended, so nothing changed. If you subscribed again since,"
+                " use the unsubscribe link in your latest brief.",
+            )
+        case UnsubscribeLinkProblem.UNKNOWN:
+            return (
+                "Link not valid",
+                "This unsubscribe link is not valid. Check that you opened the whole link from the email.",
+            )
+        case _:
+            assert_never(problem)
 
 
 def unavailable_page() -> str:

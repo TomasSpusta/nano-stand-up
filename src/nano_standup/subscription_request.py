@@ -1,18 +1,28 @@
 """Subscription request: a guarantor asks for an instrument's brief, and gets a confirm link by email.
 
 The link goes only to the guarantor email the booking system has for the instrument, never to the typed text.
+The unsubscribe link in each brief ends the subscription again.
 """
 
 import html
 import logging
-from collections.abc import Callable
+import urllib.parse
 from datetime import datetime, timedelta
 
-from nano_standup.booking_source import BookingSource
-from nano_standup.domain import PRAGUE, Clock, Instrument, day_name, normalize_email
+from nano_standup.booking_source import BookingSource, InstrumentNotFound
+from nano_standup.domain import (
+    PRAGUE,
+    Clock,
+    Instrument,
+    InstrumentName,
+    NotTheGuarantor,
+    day_name,
+    normalize_email,
+    require_guarantor,
+)
 from nano_standup.instrument_list import InstrumentListCache
 from nano_standup.mail import MailSender, Message
-from nano_standup.subscriptions import SubscriptionStore
+from nano_standup.subscriptions import ConfirmLinkProblem, Subscription, SubscriptionStore, UnsubscribeLinkProblem
 
 log = logging.getLogger(__name__)
 
@@ -22,26 +32,36 @@ CONFIRM_MAIL_GAP = timedelta(minutes=5)
 
 
 class SubscriptionRequests:
-    """Handles requests for subscriptions. Built once, with what every request needs."""
+    """Handles requests for subscriptions, their confirm links, and their unsubscribe links. Built once, with what
+    every request needs."""
 
     def __init__(
         self,
         source: BookingSource,
-        instruments: InstrumentListCache,
         store: SubscriptionStore,
         mail_sender: MailSender,
         clock: Clock,
         from_address: str,
-        confirm_url: Callable[[str], str],
+        public_base_url: str,
     ) -> None:
-        """`confirm_url` turns a token into a confirm link."""
+        """`public_base_url` is the address guarantors open the web app at, such as https://standup.example.org,
+        without a trailing slash. The confirm links in the emails start with it."""
         self._source = source
-        self._instruments = instruments
+        self._instruments = InstrumentListCache(source, clock)
         self._store = store
         self._mail_sender = mail_sender
         self._clock = clock
         self._from_address = from_address
-        self._confirm_url = confirm_url
+        self._public_base_url = public_base_url
+
+    @property
+    def confirm_link_lifetime(self) -> timedelta:
+        return self._store.confirm_link_lifetime
+
+    def instruments(self) -> list[InstrumentName]:
+        """The instruments a guarantor can subscribe to. Raises BookingApiError or BookingDataError when there is
+        no list at all."""
+        return self._instruments.get()
 
     def request(self, instrument_id: str, email: str) -> None:
         """Send a confirm link when `email` is the instrument's guarantor email, ignoring case and surrounding spaces.
@@ -65,10 +85,45 @@ class SubscriptionRequests:
                 CONFIRM_MAIL_GAP,
             )
             return
-        pending = self._store.request(instrument.id, instrument.guarantor.email, now)
-        link = self._confirm_url(pending.token)
-        self._mail_sender.send(_confirm_mail(instrument, link, pending.expires_at, self._from_address))
+        requested = self._store.request(instrument.id, instrument.guarantor.email, now)
+        link = f"{self._public_base_url}/confirm?{urllib.parse.urlencode({'token': requested.token})}"
+        self._mail_sender.send(_confirm_mail(instrument, link, requested.expires_at, self._from_address))
         log.info("Sent a confirm link for %s to %s", instrument.label, instrument.guarantor.email)
+
+    def check(self, token: str) -> Subscription | ConfirmLinkProblem:
+        """The subscription the confirm link would make active now, or why it would not. Does not use the token."""
+        return self._store.check(token, self._clock())
+
+    def confirm(self, token: str) -> Subscription | ConfirmLinkProblem:
+        """Make the requested subscription active and return it, or say why the link cannot be used.
+
+        The email must still be the instrument's guarantor email in the booking system, as the guarantor may have
+        changed since the link went out. Raises NotTheGuarantor when it is not, and BookingApiError or
+        BookingDataError when the booking system cannot tell. In both cases the link is not used up.
+        """
+        found = self._store.check(token, self._clock())
+        if isinstance(found, ConfirmLinkProblem):
+            return found
+        try:
+            instrument = self._source.get_instrument(found.instrument_id)
+        except InstrumentNotFound as error:
+            raise NotTheGuarantor(f"{found.email!r} is no longer a guarantor email: {error}") from error
+        require_guarantor(instrument, found.email)
+        confirmed = self._store.confirm(token, self._clock())
+        if isinstance(confirmed, Subscription):
+            log.info("Subscription confirmed: %s gets the brief for %s", confirmed.email, confirmed.instrument_id)
+        return confirmed
+
+    def check_unsubscribe(self, token: str) -> Subscription | UnsubscribeLinkProblem:
+        """The subscription the unsubscribe link would end, or why it would not. Does not use the token."""
+        return self._store.check_unsubscribe(token)
+
+    def unsubscribe(self, token: str) -> Subscription | UnsubscribeLinkProblem:
+        """End the subscription the unsubscribe link is for and return it, or say why the link cannot end it."""
+        ended = self._store.unsubscribe(token, self._clock())
+        if isinstance(ended, Subscription):
+            log.info("Subscription ended: %s unsubscribed from the brief for %s", ended.email, ended.instrument_id)
+        return ended
 
 
 def _confirm_mail(instrument: Instrument, link: str, expires_at: datetime, from_address: str) -> Message:

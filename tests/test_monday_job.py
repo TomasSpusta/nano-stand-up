@@ -6,7 +6,7 @@ from nano_standup.booking_source import FakeBookingSource
 from nano_standup.domain import Guarantor, Instrument, ReservationStatus
 from nano_standup.mail import InMemoryMailSender
 from nano_standup.monday_job import run_monday_job
-from nano_standup.subscriptions import Subscription, SubscriptionStore, UnsubscribeOutcome
+from nano_standup.subscriptions import Subscription, SubscriptionStore
 
 from helpers import INSTRUMENT, WORKING_HOURS, heads_up_text, reservation, visible_text
 
@@ -154,9 +154,7 @@ def test_each_brief_has_its_own_unsubscribe_link_for_its_subscription(tmp_path: 
     assert f"https://standup.example.org/unsubscribe?token={sem_token}" in sem.html
     # Mail apps show their own unsubscribe button for it.
     assert sem.unsubscribe_link == f"https://standup.example.org/unsubscribe?token={sem_token}"
-    assert store.unsubscribe(sem_token, MONDAY_8AM).subscription == Subscription(
-        INSTRUMENT.id, "hana.testova@example.org"
-    )
+    assert store.unsubscribe(sem_token, MONDAY_8AM) == Subscription(INSTRUMENT.id, "hana.testova@example.org")
 
 
 def test_the_next_monday_job_sends_nothing_for_an_unsubscribed_subscription(tmp_path: Path) -> None:
@@ -167,7 +165,9 @@ def test_the_next_monday_job_sends_nothing_for_an_unsubscribed_subscription(tmp_
     first_week = InMemoryMailSender()
     _run(source, store, first_week)
     sem = next(m for m in first_week.sent if "TEST-SEM" in m.subject)
-    assert store.unsubscribe(_unsubscribe_token(sem.text), MONDAY_8AM).outcome is UnsubscribeOutcome.UNSUBSCRIBED
+    assert store.unsubscribe(_unsubscribe_token(sem.text), MONDAY_8AM) == Subscription(
+        INSTRUMENT.id, "hana.testova@example.org"
+    )
 
     next_week = InMemoryMailSender()
     _run(source, store, next_week, now=MONDAY_8AM + timedelta(weeks=1))

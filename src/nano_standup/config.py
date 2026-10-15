@@ -11,7 +11,7 @@ from nano_standup.mail import SmtpSettings
 # Used when the settings leave out WORKING_DAY_START or WORKING_DAY_END.
 DEFAULT_WORKING_DAY_START = "07:00"
 DEFAULT_WORKING_DAY_END = "19:00"
-# Used when the settings leave out WEB_HOST or WEB_PORT. Only this machine can reach the web app; a proxy in front
+# Used when the settings leave out WEB_HOST or WEB_PORT. Only this server can reach the web app; a proxy in front
 # of it gives HTTPS.
 DEFAULT_WEB_HOST = "127.0.0.1"
 DEFAULT_WEB_PORT = "8000"

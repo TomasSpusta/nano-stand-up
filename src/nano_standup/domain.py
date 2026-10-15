@@ -47,6 +47,18 @@ class Instrument:
         return f"{self.alias} ({self.id})"
 
 
+class NotTheGuarantor(ValueError):
+    pass
+
+
+def require_guarantor(instrument: Instrument, email: str) -> None:
+    """Raise NotTheGuarantor unless `email` is the instrument's guarantor email. Names are never compared."""
+    if normalize_email(email) != normalize_email(instrument.guarantor.email):
+        raise NotTheGuarantor(
+            f"{email.strip()!r} is not the guarantor email of {instrument.label} in the booking system"
+        )
+
+
 @dataclass(frozen=True)
 class InstrumentName:
     """An instrument's id and names, without its guarantor. Enough to pick it from a list."""

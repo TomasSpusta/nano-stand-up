@@ -13,9 +13,11 @@ import uvicorn
 from nano_standup.booking_api import ApiBookingSource, HttpBookingApi
 from nano_standup.booking_source import InstrumentNotFound
 from nano_standup.config import ConfigError, Settings, load_settings
+from nano_standup.domain import NotTheGuarantor
 from nano_standup.mail import SmtpMailSender
 from nano_standup.monday_job import run_monday_job
-from nano_standup.service_admin import NotTheGuarantor, add_subscription
+from nano_standup.service_admin import add_subscription
+from nano_standup.subscription_request import SubscriptionRequests
 from nano_standup.subscriptions import SubscriptionStore
 from nano_standup.web import create_app, unsubscribe_link_for
 
@@ -78,7 +80,7 @@ def _run_monday_job(settings: Settings) -> int:
 
 def _serve(settings: Settings) -> int:
     public_base_url = _public_base_url(settings, "the web app needs for its confirm links")
-    app = create_app(
+    requests = SubscriptionRequests(
         source=_booking_source(settings),
         store=_store(settings),
         mail_sender=SmtpMailSender(settings.smtp),
@@ -86,6 +88,7 @@ def _serve(settings: Settings) -> int:
         from_address=settings.mail_from,
         public_base_url=public_base_url,
     )
+    app = create_app(requests)
     # No access log: it writes each full URL, and a confirm or unsubscribe link's URL holds its token.
     # The app logs what matters.
     uvicorn.run(app, host=settings.web_host, port=settings.web_port, access_log=False)

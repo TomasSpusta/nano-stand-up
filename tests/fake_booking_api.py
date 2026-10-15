@@ -21,11 +21,11 @@ MAX_PAGE_SIZE = 50  # The real API fails with a server error on larger pages whe
 LIST_SCOPES_THAT_FAIL = {"ge_realised_for_contactid"}
 # The statecode that goes with each statuscode, as in real data.
 STATECODES = {RESERVED_STATUS: RESERVED_STATE, REQUESTED_STATUS: REQUESTED_STATE, CANCELLED_STATUS: CANCELLED_STATE}
-# The core facility record that CF nano equipment links to, as the real API gives it.
+# The core facility record that CF nano booking resources link to, as the real API gives it.
 CF_NANO = {"id": "equip-cf-nano", "name": CF_NANO_NAME, "ge_alias": CF_NANO_NAME, "ge_corefacilita": True}
-# The equipment filters the source uses, and how the fake reads each from the stored JSON.
+# The `/api/equipment` filters the source uses, and how the fake reads each from the stored JSON.
 # A true or false field compares as 1 or 0. A null never matches, as in the real API.
-EQUIPMENT_FILTERS: dict[str, Callable[[dict[str, Any]], Any]] = {  # Any: mirrors the API's JSON.
+INSTRUMENT_LIST_FILTERS: dict[str, Callable[[dict[str, Any]], Any]] = {  # Any: mirrors the API's JSON.
     "ge_vyrazen": lambda x: _as_number(x.get("ge_vyrazen")),
     "ge_donotshowinplanningboard": lambda x: _as_number(x.get("ge_donotshowinplanningboard")),
     "ge_corefacilityid.name": lambda x: (x.get("ge_corefacilityid") or {}).get("name"),
@@ -43,8 +43,8 @@ class FakeBookingApi:
 
     def get(self, path: str, params: Params) -> Any:  # Any: mirrors the JSON shape of the real API.
         if path == "/api/equipment":
-            listed = self._page(path, list(self.instruments.values()), params, set(EQUIPMENT_FILTERS))
-            return [_equipment_listed(x, params) for x in listed]
+            listed = self._page(path, list(self.instruments.values()), params, set(INSTRUMENT_LIST_FILTERS))
+            return [_listed_instrument(x, params) for x in listed]
         if path.startswith("/api/equipment/"):
             item = self.instruments.get(path.removeprefix("/api/equipment/"))
             if item is None:
@@ -84,7 +84,7 @@ class FakeBookingApi:
         return matching[(page - 1) * limit : page * limit]
 
 
-def _equipment_listed(item: dict[str, Any], params: Params) -> dict[str, Any]:  # Any: mirrors the API's JSON.
+def _listed_instrument(item: dict[str, Any], params: Params) -> dict[str, Any]:  # Any: mirrors the API's JSON.
     """A link holds only the id unless the scope expands it. A missing link is an empty list, not null."""
     scopes = set(str(params.get("scope", "")).split(","))
     listed = dict(item)
@@ -102,7 +102,7 @@ def _matches(item: dict[str, Any], filters: list[str], fields: set[str]) -> bool
         column, operator, value = f.split(":", 2)
         if column not in fields:
             raise AssertionError(f"FakeBookingApi does not support filter {f!r}")
-        reader = EQUIPMENT_FILTERS.get(column)
+        reader = INSTRUMENT_LIST_FILTERS.get(column)
         item_value = reader(item) if reader else item.get(column)
         # A row with no value in the column never matches.
         if item_value is None:
@@ -145,8 +145,8 @@ def instrument_json(
 
 
 def person_json(firstname: str, lastname: str) -> dict[str, Any]:  # Any: mirrors the API's JSON.
-    """A booking resource that is a person, as the real API has them: in CF nano, not retired, owned by the person,
-    with the name as alias and English name, and hidden from the planning board."""
+    """A booking resource that is a person, as the real API has them: in CF nano, not retired, with the person in
+    `ge_ownerid`, with the name as alias and English name, and hidden from the planning board."""
     name = f"{lastname} {firstname}"
     return instrument_json(
         f"equip-person-{lastname}",

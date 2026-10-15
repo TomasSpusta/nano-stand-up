@@ -18,10 +18,9 @@ INSTRUMENT_LIST_MAX_AGE = timedelta(minutes=30)
 
 
 class InstrumentListCache:
-    def __init__(self, source: BookingSource, clock: Clock, max_age: timedelta = INSTRUMENT_LIST_MAX_AGE) -> None:
+    def __init__(self, source: BookingSource, clock: Clock) -> None:
         self._source = source
         self._clock = clock
-        self._max_age = max_age
         self._instruments: list[InstrumentName] | None = None
         self._read_at: datetime | None = None
         # The web app serves requests in threads. One list read at a time is enough.
@@ -35,7 +34,8 @@ class InstrumentListCache:
         """
         with self._lock:
             now = self._clock()
-            if self._instruments is not None and self._read_at is not None and now - self._read_at < self._max_age:
+            fresh = self._read_at is not None and now - self._read_at < INSTRUMENT_LIST_MAX_AGE
+            if fresh and self._instruments is not None:
                 return self._instruments
             try:
                 self._instruments = self._source.list_subscribable_instruments()

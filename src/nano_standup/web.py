@@ -1,74 +1,60 @@
 """Web app: the page where a guarantor subscribes to an instrument's brief, the confirm link, and the unsubscribe
 link in each brief.
 
-The routes stay thin: the work is in `SubscriptionRequests` and `SubscriptionStore`, and the HTML in `web_pages`.
+The routes stay thin: the work is in `SubscriptionRequests`, and the HTML in `web_pages`.
 """
 
 import logging
-import sqlite3
 import urllib.parse
-from typing import Annotated
+from typing import Annotated, assert_never
 
 from fastapi import BackgroundTasks, FastAPI, Form, Query
 from fastapi.responses import HTMLResponse
 
 from nano_standup.booking_api import BookingApiError, BookingDataError
-from nano_standup.booking_source import BookingSource, InstrumentNotFound
-from nano_standup.domain import Clock
-from nano_standup.instrument_list import InstrumentListCache
-from nano_standup.mail import MailSender
+from nano_standup.booking_source import InstrumentNotFound
+from nano_standup.domain import NotTheGuarantor
 from nano_standup.subscription_request import SubscriptionRequests
-from nano_standup.subscriptions import ConfirmOutcome, SubscriptionStore, UnsubscribeOutcome
+from nano_standup.subscriptions import ConfirmLinkProblem, UnsubscribeLinkProblem
 from nano_standup.web_pages import (
     FORM_PROBLEM,
     confirm_button_page,
-    confirm_page,
+    confirm_problem_page,
+    confirm_unavailable_page,
+    confirmed_page,
     form_page,
+    not_the_guarantor_page,
     requested_page,
     unavailable_page,
     unsubscribe_button_page,
-    unsubscribe_page,
+    unsubscribe_problem_page,
+    unsubscribed_page,
 )
 
 log = logging.getLogger(__name__)
 
-OUTCOME_STATUS: dict[ConfirmOutcome | UnsubscribeOutcome, int] = {
-    ConfirmOutcome.CONFIRMED: 200,
-    ConfirmOutcome.READY: 200,
-    ConfirmOutcome.EXPIRED: 410,
-    ConfirmOutcome.USED: 410,
-    ConfirmOutcome.UNKNOWN: 404,
-    # "Already unsubscribed" is a normal answer, not an error: the guarantor gets what they asked for.
-    UnsubscribeOutcome.UNSUBSCRIBED: 200,
-    UnsubscribeOutcome.READY: 200,
-    UnsubscribeOutcome.ALREADY_UNSUBSCRIBED: 200,
-    UnsubscribeOutcome.UNKNOWN: 404,
-}
+
+def link_problem_status(problem: ConfirmLinkProblem | UnsubscribeLinkProblem) -> int:
+    # A match, not a dict, so the type checker fails when a new problem has no status.
+    match problem:
+        case ConfirmLinkProblem.EXPIRED | ConfirmLinkProblem.USED:
+            return 410
+        case ConfirmLinkProblem.UNKNOWN | UnsubscribeLinkProblem.UNKNOWN:
+            return 404
+        case UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED:
+            # A normal answer, not an error: the guarantor gets what they asked for.
+            return 200
+        case _:
+            assert_never(problem)
 
 
 def unsubscribe_link_for(public_base_url: str, token: str) -> str:
-    """The unsubscribe link in a brief. The web app answers it."""
-    return f"{public_base_url.rstrip('/')}/unsubscribe?{urllib.parse.urlencode({'token': token})}"
+    """The unsubscribe link in a brief. The web app answers it. `public_base_url` has no trailing slash."""
+    return f"{public_base_url}/unsubscribe?{urllib.parse.urlencode({'token': token})}"
 
 
-def create_app(
-    source: BookingSource,
-    store: SubscriptionStore,
-    mail_sender: MailSender,
-    clock: Clock,
-    from_address: str,
-    public_base_url: str,
-) -> FastAPI:
-    """`public_base_url` is the address guarantors open the app at, such as https://standup.example.org.
-    The confirm links in the emails start with it."""
-    base_url = public_base_url.rstrip("/")
+def create_app(requests: SubscriptionRequests) -> FastAPI:
     app = FastAPI(title="Nano Stand-up", docs_url=None, redoc_url=None, openapi_url=None)
-    instruments = InstrumentListCache(source, clock)
-
-    def confirm_url(token: str) -> str:
-        return f"{base_url}/confirm?{urllib.parse.urlencode({'token': token})}"
-
-    requests = SubscriptionRequests(source, instruments, store, mail_sender, clock, from_address, confirm_url)
 
     def request_in_background(instrument_id: str, email: str) -> None:
         """Runs after the page is sent, so the page and its timing are the same whether or not the email matched."""
@@ -76,15 +62,13 @@ def create_app(
             requests.request(instrument_id, email)
         except InstrumentNotFound as error:
             log.warning("Subscription request refused: %s", error)
-        except (BookingApiError, BookingDataError, sqlite3.Error, OSError):
-            # OSError covers the SMTP errors. The guarantor sees no email and can try again.
-            log.exception("Subscription request for instrument %s failed", instrument_id)
-        except Exception:  # Last resort: log any other failure here, and keep the web service running.
+        except Exception:  # Booking system, database, or mail errors: log them and keep the web service running.
+            # The guarantor sees no email and can try again.
             log.exception("Subscription request for instrument %s failed", instrument_id)
 
     def form(problem: str = "", status_code: int = 200) -> HTMLResponse:
         try:
-            listed = instruments.get()
+            listed = requests.instruments()
         except (BookingApiError, BookingDataError):
             log.exception("Cannot list the instruments for the subscribe page")
             return HTMLResponse(unavailable_page(), status_code=503)
@@ -103,32 +87,37 @@ def create_app(
         if not instrument_id.strip() or not email.strip():
             return form(FORM_PROBLEM, status_code=400)
         background.add_task(request_in_background, instrument_id.strip(), email)
-        return HTMLResponse(requested_page(store.confirm_link_lifetime))
+        return HTMLResponse(requested_page(requests.confirm_link_lifetime))
 
     @app.get("/confirm", response_class=HTMLResponse)
     def show_confirm(token: str = "") -> HTMLResponse:
         """Shows the Confirm button, or at once why the link cannot be used. It never uses the token."""
-        outcome = store.check(token, clock())
-        page = confirm_button_page(token) if outcome is ConfirmOutcome.READY else confirm_page(outcome)
-        return HTMLResponse(page, status_code=OUTCOME_STATUS[outcome])
+        found = requests.check(token)
+        if isinstance(found, ConfirmLinkProblem):
+            return HTMLResponse(confirm_problem_page(found), status_code=link_problem_status(found))
+        return HTMLResponse(confirm_button_page(token))
 
     @app.post("/confirm", response_class=HTMLResponse)
     def confirm(token: Annotated[str, Form()] = "") -> HTMLResponse:
-        result = store.confirm(token, clock())
-        if result.subscription:
-            log.info(
-                "Subscription confirmed: %s gets the brief for %s",
-                result.subscription.email,
-                result.subscription.instrument_id,
-            )
-        return HTMLResponse(confirm_page(result.outcome), status_code=OUTCOME_STATUS[result.outcome])
+        try:
+            confirmed = requests.confirm(token)
+        except NotTheGuarantor as error:
+            log.warning("Subscription not confirmed: %s", error)
+            return HTMLResponse(not_the_guarantor_page(), status_code=403)
+        except (BookingApiError, BookingDataError):
+            log.exception("Cannot check the guarantor to confirm a subscription")
+            return HTMLResponse(confirm_unavailable_page(), status_code=503)
+        if isinstance(confirmed, ConfirmLinkProblem):
+            return HTMLResponse(confirm_problem_page(confirmed), status_code=link_problem_status(confirmed))
+        return HTMLResponse(confirmed_page())
 
     @app.get("/unsubscribe", response_class=HTMLResponse)
     def show_unsubscribe(token: str = "") -> HTMLResponse:
         """Shows the Unsubscribe button, or at once why the link cannot be used. It never uses the token."""
-        outcome = store.check_unsubscribe(token)
-        page = unsubscribe_button_page(token) if outcome is UnsubscribeOutcome.READY else unsubscribe_page(outcome)
-        return HTMLResponse(page, status_code=OUTCOME_STATUS[outcome])
+        found = requests.check_unsubscribe(token)
+        if isinstance(found, UnsubscribeLinkProblem):
+            return HTMLResponse(unsubscribe_problem_page(found), status_code=link_problem_status(found))
+        return HTMLResponse(unsubscribe_button_page(token))
 
     @app.post("/unsubscribe", response_class=HTMLResponse)
     def unsubscribe(
@@ -137,13 +126,9 @@ def create_app(
     ) -> HTMLResponse:
         """The button sends the token in the form. A mail app's one-click unsubscribe (RFC 8058) posts to the link
         itself, so the token is in the URL."""
-        result = store.unsubscribe(token or link_token, clock())
-        if result.subscription:
-            log.info(
-                "Subscription ended: %s unsubscribed from the brief for %s",
-                result.subscription.email,
-                result.subscription.instrument_id,
-            )
-        return HTMLResponse(unsubscribe_page(result.outcome), status_code=OUTCOME_STATUS[result.outcome])
+        ended = requests.unsubscribe(token or link_token)
+        if isinstance(ended, UnsubscribeLinkProblem):
+            return HTMLResponse(unsubscribe_problem_page(ended), status_code=link_problem_status(ended))
+        return HTMLResponse(unsubscribed_page())
 
     return app

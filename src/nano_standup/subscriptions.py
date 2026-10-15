@@ -69,44 +69,27 @@ class Subscription:
 
 
 @dataclass(frozen=True)
-class PendingSubscription:
+class RequestedSubscription:
     """A requested subscription. The token goes in the confirm link and is not stored."""
 
     token: str
     expires_at: datetime
 
 
-class ConfirmOutcome(Enum):
-    CONFIRMED = "confirmed"
-    # Only from `check`: the link is valid and not used yet.
-    READY = "ready"
+class ConfirmLinkProblem(Enum):
+    """Why a confirm link cannot be used now."""
+
     EXPIRED = "expired"
     USED = "used"
     UNKNOWN = "unknown"
 
 
-@dataclass(frozen=True)
-class ConfirmResult:
-    outcome: ConfirmOutcome
-    # The active subscription when the outcome is CONFIRMED, otherwise None.
-    subscription: Subscription | None = None
+class UnsubscribeLinkProblem(Enum):
+    """Why an unsubscribe link cannot end a subscription now."""
 
-
-class UnsubscribeOutcome(Enum):
-    UNSUBSCRIBED = "unsubscribed"
-    # Only from `check_unsubscribe`: the link would end an active subscription.
-    READY = "ready"
     # The link was used, or its subscription has ended in another way.
     ALREADY_UNSUBSCRIBED = "already unsubscribed"
     UNKNOWN = "unknown"
-
-
-@dataclass(frozen=True)
-class UnsubscribeResult:
-    outcome: UnsubscribeOutcome
-    # The subscription that ended when the outcome is UNSUBSCRIBED, or that would end when it is READY.
-    # Otherwise None.
-    subscription: Subscription | None = None
 
 
 class SubscriptionStore:
@@ -131,7 +114,7 @@ class SubscriptionStore:
             _activate(db, subscription, now)
         return subscription
 
-    def request(self, instrument_id: str, email: str, now: datetime) -> PendingSubscription:
+    def request(self, instrument_id: str, email: str, now: datetime) -> RequestedSubscription:
         """Request a subscription. It becomes active only when `confirm` gets the returned token in time."""
         token = secrets.token_urlsafe(TOKEN_BYTES)
         expires_at = now + self._confirm_link_lifetime
@@ -141,13 +124,12 @@ class SubscriptionStore:
                 " VALUES (?, ?, ?, ?, ?)",
                 (_hash(token), instrument_id, normalize_email(email), now.isoformat(), expires_at.isoformat()),
             )
-        return PendingSubscription(token, expires_at)
+        return RequestedSubscription(token, expires_at)
 
-    def check(self, token: str, now: datetime) -> ConfirmOutcome:
-        """What `confirm` would do with the token now, without using it: READY, EXPIRED, USED, or UNKNOWN."""
+    def check(self, token: str, now: datetime) -> Subscription | ConfirmLinkProblem:
+        """The subscription `confirm` would make active with the token now, or why it would not. Does not use it."""
         with closing(self._connect()) as db:
-            row = _confirm_link_row(db, token)
-        return _refusal(row, now) or ConfirmOutcome.READY
+            return _confirm_link_subscription(db, token, now)
 
     def has_recent_request(self, instrument_id: str, since: datetime, now: datetime) -> bool:
         """True when a request for the instrument made after `since` still has a link that works."""
@@ -161,24 +143,24 @@ class SubscriptionStore:
             for created_at, expires_at in rows
         )
 
-    def confirm(self, token: str, now: datetime) -> ConfirmResult:
-        """Make the requested subscription active. Each token works once, and only before it expires."""
+    def confirm(self, token: str, now: datetime) -> Subscription | ConfirmLinkProblem:
+        """Make the requested subscription active and return it, or say why the link cannot be used.
+
+        Each token works once, and only before it expires.
+        """
         with closing(self._connect()) as db, db:
-            row = _confirm_link_row(db, token)
-            refusal = _refusal(row, now)
-            if refusal or row is None:
-                return ConfirmResult(refusal or ConfirmOutcome.UNKNOWN)
-            instrument_id, email, _, _ = row
+            subscription = _confirm_link_subscription(db, token, now)
+            if isinstance(subscription, ConfirmLinkProblem):
+                return subscription
             # "used_at IS NULL" makes a second confirm of the same token at the same moment find nothing to update.
             updated = db.execute(
                 "UPDATE confirm_link SET used_at = ? WHERE token_hash = ? AND used_at IS NULL",
                 (now.isoformat(), _hash(token)),
             )
             if updated.rowcount == 0:
-                return ConfirmResult(ConfirmOutcome.USED)
-            subscription = Subscription(instrument_id, email)
+                return ConfirmLinkProblem.USED
             _activate(db, subscription, now)
-        return ConfirmResult(ConfirmOutcome.CONFIRMED, subscription)
+        return subscription
 
     def unsubscribe_token(self, subscription: Subscription, now: datetime) -> str:
         """A new token for the unsubscribe link in one brief of the subscription. Only its hash is stored."""
@@ -190,22 +172,22 @@ class SubscriptionStore:
             )
         return token
 
-    def check_unsubscribe(self, token: str) -> UnsubscribeOutcome:
-        """What `unsubscribe` would do with the token, without using it: READY, ALREADY_UNSUBSCRIBED, or UNKNOWN."""
+    def check_unsubscribe(self, token: str) -> Subscription | UnsubscribeLinkProblem:
+        """The active subscription `unsubscribe` would end with the token, or why it would not. Does not use it."""
         with closing(self._connect()) as db:
-            return _check_unsubscribe_link(db, token).outcome
+            return _unsubscribe_link_subscription(db, token)
 
-    def unsubscribe(self, token: str, now: datetime) -> UnsubscribeResult:
-        """End the subscription the token's link is for, and only that one."""
+    def unsubscribe(self, token: str, now: datetime) -> Subscription | UnsubscribeLinkProblem:
+        """End the subscription the token's link is for, and only that one. Return it, or say why the link cannot
+        end it."""
         with closing(self._connect()) as db, db:
-            checked = _check_unsubscribe_link(db, token)
-            subscription = checked.subscription
-            if checked.outcome is not UnsubscribeOutcome.READY or subscription is None:
-                return UnsubscribeResult(checked.outcome)
+            subscription = _unsubscribe_link_subscription(db, token)
+            if isinstance(subscription, UnsubscribeLinkProblem):
+                return subscription
             if not _end(db, subscription, now):
                 # Another request ended it at the same moment.
-                return UnsubscribeResult(UnsubscribeOutcome.ALREADY_UNSUBSCRIBED)
-        return UnsubscribeResult(UnsubscribeOutcome.UNSUBSCRIBED, subscription)
+                return UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED
+        return subscription
 
     def list_active(self) -> list[Subscription]:
         with closing(self._connect()) as db:
@@ -215,27 +197,36 @@ class SubscriptionStore:
         return [Subscription(instrument_id, email) for instrument_id, email in rows]
 
 
-# A confirm_link row: instrument_id, email, expires_at, used_at.
-_ConfirmLinkRow = tuple[str, str, str, str | None]
+@dataclass(frozen=True)
+class _ConfirmLink:
+    """A row of the confirm_link table."""
+
+    instrument_id: str
+    email: str
+    expires_at: datetime
+    used: bool
 
 
-def _confirm_link_row(db: sqlite3.Connection, token: str) -> _ConfirmLinkRow | None:
-    row: _ConfirmLinkRow | None = db.execute(
+def _confirm_link(db: sqlite3.Connection, token: str) -> _ConfirmLink | None:
+    row: tuple[str, str, str, str | None] | None = db.execute(
         "SELECT instrument_id, email, expires_at, used_at FROM confirm_link WHERE token_hash = ?", (_hash(token),)
     ).fetchone()
-    return row
-
-
-def _refusal(row: _ConfirmLinkRow | None, now: datetime) -> ConfirmOutcome | None:
-    """Why the link cannot be used now, or None when it can."""
     if row is None:
-        return ConfirmOutcome.UNKNOWN
-    _, _, expires_at, used_at = row
-    if used_at is not None:
-        return ConfirmOutcome.USED
-    if now >= datetime.fromisoformat(expires_at):
-        return ConfirmOutcome.EXPIRED
-    return None
+        return None
+    instrument_id, email, expires_at, used_at = row
+    return _ConfirmLink(instrument_id, email, datetime.fromisoformat(expires_at), used=used_at is not None)
+
+
+def _confirm_link_subscription(db: sqlite3.Connection, token: str, now: datetime) -> Subscription | ConfirmLinkProblem:
+    """The subscription the token's link would make active now, or why the link cannot be used."""
+    link = _confirm_link(db, token)
+    if link is None:
+        return ConfirmLinkProblem.UNKNOWN
+    if link.used:
+        return ConfirmLinkProblem.USED
+    if now >= link.expires_at:
+        return ConfirmLinkProblem.EXPIRED
+    return Subscription(link.instrument_id, link.email)
 
 
 def _activate(db: sqlite3.Connection, subscription: Subscription, now: datetime) -> None:
@@ -247,21 +238,21 @@ def _activate(db: sqlite3.Connection, subscription: Subscription, now: datetime)
     )
 
 
-def _check_unsubscribe_link(db: sqlite3.Connection, token: str) -> UnsubscribeResult:
-    """READY with the active subscription the link would end, or why it cannot end one."""
+def _unsubscribe_link_subscription(db: sqlite3.Connection, token: str) -> Subscription | UnsubscribeLinkProblem:
+    """The active subscription the token's link would end, or why the link cannot end one."""
     row: tuple[str, str, str | None] | None = db.execute(
         "SELECT instrument_id, email, used_at FROM unsubscribe_link WHERE token_hash = ?", (_hash(token),)
     ).fetchone()
     if row is None:
-        return UnsubscribeResult(UnsubscribeOutcome.UNKNOWN)
+        return UnsubscribeLinkProblem.UNKNOWN
     instrument_id, email, used_at = row
     active = db.execute(
         "SELECT 1 FROM subscription WHERE instrument_id = ? AND email = ? AND status = 'active'",
         (instrument_id, email),
     ).fetchone()
     if used_at is not None or active is None:
-        return UnsubscribeResult(UnsubscribeOutcome.ALREADY_UNSUBSCRIBED)
-    return UnsubscribeResult(UnsubscribeOutcome.READY, Subscription(instrument_id, email))
+        return UnsubscribeLinkProblem.ALREADY_UNSUBSCRIBED
+    return Subscription(instrument_id, email)
 
 
 def _end(db: sqlite3.Connection, subscription: Subscription, now: datetime) -> bool:
