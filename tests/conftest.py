@@ -3,6 +3,9 @@ from collections.abc import Iterator
 
 import pytest
 
+# Runs a pytest run inside a test, to check what a failure prints.
+pytest_plugins = ["pytester"]
+
 # The names a Czech time language can have on Linux.
 CZECH_TIME_LANGUAGES = ("cs_CZ.UTF-8", "cs_CZ.utf8")
 

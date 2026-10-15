@@ -44,6 +44,10 @@ API_TIME = "%Y-%m-%dT%H:%M:%S"
 # A recording starts about when its reservation does. One day of margin each side is enough to find it.
 RECORDING_MARGIN = timedelta(days=1)
 LOGIN_PATH = "/api/login"
+# The user name of a reservation whose user has no name in the booking system.
+UNKNOWN_USER_NAME = "Unknown user"
+# The log message for a reservation statuscode the source does not know. The live API check looks for it.
+UNKNOWN_STATUSCODE_LOG = "%s has an unknown statuscode %r (statecode %r); the brief shows it as reserved"
 
 
 class BookingApiError(RuntimeError):
@@ -273,7 +277,7 @@ def _reservation(item: dict[str, Any]) -> Reservation:  # Any: parsed JSON.
         start=_local_time(item, "scheduledstart", what),
         end=_local_time(item, "scheduledend", what),
         user_id=contact.get("id") or "",
-        user_name=name or "Unknown user",
+        user_name=name or UNKNOWN_USER_NAME,
         project_code=(item.get("subject") or "").strip(),
         experiment_plan="",
         status=_status(item, what),
@@ -289,12 +293,7 @@ def _status(item: dict[str, Any], what: str) -> ReservationStatus:  # Any: parse
     if statuscode == REQUESTED_STATUS:
         return ReservationStatus.REQUESTED
     if statuscode != RESERVED_STATUS:
-        log.warning(
-            "%s has an unknown statuscode %r (statecode %r); the brief shows it as reserved",
-            what,
-            statuscode,
-            statecode,
-        )
+        log.warning(UNKNOWN_STATUSCODE_LOG, what, statuscode, statecode)
     return ReservationStatus.RESERVED
 
 

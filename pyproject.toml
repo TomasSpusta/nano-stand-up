@@ -44,4 +44,4 @@ select = ["F", "E", "W", "I", "B", "UP", "SIM"]
 
 [tool.ruff.lint.isort]
 # Shared test modules in tests/; keep them in their own group after the project imports.
-known-local-folder = ["fake_booking_api", "helpers", "local_booking_server"]
+known-local-folder = ["fake_booking_api", "helpers", "local_booking_server", "live_api_safety"]
