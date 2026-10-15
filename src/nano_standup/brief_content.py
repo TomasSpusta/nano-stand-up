@@ -78,7 +78,10 @@ class Row:
 
     @property
     def notes(self) -> list[LabelledNote]:
-        """The note and the private note, in that order, even when empty. Each version of the brief leaves out an empty one."""
+        """The note and the private note, in that order, even when empty.
+
+        Each version of the brief leaves out an empty one.
+        """
         return [LabelledNote("Note", self.note), LabelledNote("Private note", self.private_note)]
 
 
@@ -144,11 +147,11 @@ def brief_content(
         subject=f"Brief: {instrument.alias} - week {_week_span(week)}",
         for_whom=f"Weekly brief for {instrument.guarantor.name}",
         instrument_name=instrument.name,
-        week_line=f"{instrument.alias} - Monday {_day_month(week.monday)} to Sunday {_day_month(week.sunday)} {week.sunday.year}",
+        week_line=f"{instrument.alias} - Monday {_day_month(week.monday)} to Sunday {_day_month_year(week.sunday)}",
         counts=_counts(week, reservations) if reservations else [],
         heads_ups=_heads_ups(week, reservations, working_hours),
         days=_days(week, reservations) if reservations else [],
-        built=f"Built on {day_name(built_local.date())} {_day_month(built_local.date())} {built_local.year} at {built_local:%H:%M}.",
+        built=f"Built on {_full_date(built_local.date())} at {built_local:%H:%M}.",
     )
 
 
@@ -275,10 +278,10 @@ def _week_span(week: Week) -> str:
     """"19.-25. 10. 2026", or "28. 9.-4. 10. 2026" when the week spans two months."""
     monday, sunday = week.monday, week.sunday
     if monday.year != sunday.year:
-        return f"{_day_month(monday)} {monday.year}-{_day_month(sunday)} {sunday.year}"
+        return f"{_day_month_year(monday)}-{_day_month_year(sunday)}"
     if monday.month != sunday.month:
-        return f"{_day_month(monday)}-{_day_month(sunday)} {sunday.year}"
-    return f"{monday.day}.-{_day_month(sunday)} {sunday.year}"
+        return f"{_day_month(monday)}-{_day_month_year(sunday)}"
+    return f"{monday.day}.-{_day_month_year(sunday)}"
 
 
 def _short_day_name(day: date) -> str:
@@ -288,3 +291,13 @@ def _short_day_name(day: date) -> str:
 
 def _day_month(day: date) -> str:
     return f"{day.day}. {day.month}."
+
+
+def _day_month_year(day: date) -> str:
+    """A day with its year, such as "20. 10. 2026"."""
+    return f"{_day_month(day)} {day.year}"
+
+
+def _full_date(day: date) -> str:
+    """A day with its name and year, such as "Tuesday 20. 10. 2026"."""
+    return f"{day_name(day)} {_day_month_year(day)}"

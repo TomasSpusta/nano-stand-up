@@ -6,7 +6,13 @@ import pytest
 
 from nano_standup.mail import Message, SmtpMailSender, SmtpSettings
 
-MESSAGE = Message(from_address="standup@example.org", to="hana.testova@example.org", subject="Brief: TEST-SEM", html="<p>Hi</p>", text="Hi")
+MESSAGE = Message(
+    from_address="standup@example.org",
+    to="hana.testova@example.org",
+    subject="Brief: TEST-SEM",
+    html="<p>Hi</p>",
+    text="Hi",
+)
 
 
 class FakeSmtp:
@@ -66,7 +72,9 @@ def test_sends_plain_text_and_html_versions_without_login_or_tls(smtp: list[Fake
 
 
 def test_starts_tls_then_logs_in_before_sending(smtp: list[FakeSmtp]) -> None:
-    settings = SmtpSettings(host="mail.example.org", port=587, username="standup", password="test-password", starttls=True)
+    settings = SmtpSettings(
+        host="mail.example.org", port=587, username="standup", password="test-password", starttls=True
+    )
 
     SmtpMailSender(settings).send(MESSAGE)
 

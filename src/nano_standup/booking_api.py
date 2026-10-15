@@ -120,13 +120,16 @@ class ApiBookingSource:
         ids = [
             _required(item, "id", "A reservation in the list")
             for item in self._pages("/api/service-appointment", _overlap_filters(week), scope="activity_parties")
-            if any((party.get("partyid") or {}).get("id") == instrument_id for party in item.get("activity_parties") or [])
+            if _uses_instrument(item, instrument_id)
         ]
         if not ids:
             return []
         reservations = [
             _reservation(
-                self._api.get(f"/api/service-appointment/{urllib.parse.quote(reservation_id)}", {"scope": "ge_realised_for_contactid"})
+                self._api.get(
+                    f"/api/service-appointment/{urllib.parse.quote(reservation_id)}",
+                    {"scope": "ge_realised_for_contactid"},
+                )
             )
             for reservation_id in ids
         ]
@@ -199,8 +202,18 @@ def _status(item: dict[str, Any], what: str) -> ReservationStatus:  # Any: parse
     if statuscode == REQUESTED_STATUS:
         return ReservationStatus.REQUESTED
     if statuscode != RESERVED_STATUS:
-        log.warning("%s has an unknown statuscode %r (statecode %r); the brief shows it as reserved", what, statuscode, statecode)
+        log.warning(
+            "%s has an unknown statuscode %r (statecode %r); the brief shows it as reserved",
+            what,
+            statuscode,
+            statecode,
+        )
     return ReservationStatus.RESERVED
+
+
+def _uses_instrument(item: dict[str, Any], instrument_id: str) -> bool:  # Any: parsed JSON.
+    """True when the instrument is one of the reservation's activity parties."""
+    return any((party.get("partyid") or {}).get("id") == instrument_id for party in item.get("activity_parties") or [])
 
 
 def _required(item: Any, key: str, what: str) -> Any:  # Any: parsed JSON.
@@ -219,7 +232,9 @@ def _local_time(item: dict[str, Any], key: str, what: str) -> datetime:  # Any: 
     except ValueError as error:
         raise BookingDataError(f"{what} has a {key} that is not a date and time: {text!r}") from error
     if value.tzinfo is not None:
-        raise BookingDataError(f"{what} has a {key} with a time zone ({text!r}); the service expects Prague local time without one")
+        raise BookingDataError(
+            f"{what} has a {key} with a time zone ({text!r}); the service expects Prague local time without one"
+        )
     return value
 
 

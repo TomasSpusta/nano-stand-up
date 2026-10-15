@@ -41,7 +41,9 @@ def test_optional_smtp_login_and_starttls(tmp_path: Path) -> None:
 
     smtp = load_settings(write(tmp_path, text), environ={}).smtp
 
-    assert smtp == SmtpSettings(host="localhost", port=1025, username="standup", password="test-password", starttls=True)
+    assert smtp == SmtpSettings(
+        host="localhost", port=1025, username="standup", password="test-password", starttls=True
+    )
 
 
 def test_environment_wins_over_the_file(tmp_path: Path) -> None:
@@ -96,5 +98,7 @@ def test_a_bad_working_day_time_is_named(tmp_path: Path, value: str) -> None:
 def test_a_working_day_that_ends_before_it_starts_is_named(tmp_path: Path) -> None:
     text = FULL + "WORKING_DAY_START=19:00\nWORKING_DAY_END=07:00\n"
 
-    with pytest.raises(ConfigError, match="WORKING_DAY_START and WORKING_DAY_END: Working day must start before it ends"):
+    with pytest.raises(
+        ConfigError, match="WORKING_DAY_START and WORKING_DAY_END: Working day must start before it ends"
+    ):
         load_settings(write(tmp_path, text), environ={})

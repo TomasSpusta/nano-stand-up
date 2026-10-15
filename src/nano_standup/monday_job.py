@@ -1,6 +1,7 @@
 """Monday job: builds and sends this week's brief for every active subscription."""
 
 import logging
+
 from nano_standup.booking_source import BookingSource
 from nano_standup.brief import build_brief
 from nano_standup.domain import PRAGUE, Clock, Week, WorkingHours
@@ -27,7 +28,13 @@ def run_monday_job(
         reservations = source.get_reservations(instrument.id, week)
         brief = build_brief(instrument, week, reservations, built_at=now, working_hours=working_hours)
         mail_sender.send(
-            Message(from_address=from_address, to=subscription.email, subject=brief.subject, html=brief.html, text=brief.text)
+            Message(
+                from_address=from_address,
+                to=subscription.email,
+                subject=brief.subject,
+                html=brief.html,
+                text=brief.text,
+            )
         )
         log.info("Sent brief for %s to %s", instrument.label, subscription.email)
         sent += 1
