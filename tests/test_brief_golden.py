@@ -47,11 +47,18 @@ def _brief(reservations: list[Reservation]) -> Brief:
     return build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT)
 
 
+def _golden_path(name: str) -> Path:
+    return GOLDEN / name
+
+
+def _saved(name: str) -> str:
+    return _golden_path(name).read_text(encoding="utf-8")
+
+
 def _assert_same_as_saved(name: str, actual: str) -> None:
-    path = GOLDEN / name
     if os.environ.get("UPDATE_GOLDEN"):
-        path.write_text(actual, encoding="utf-8")
-    assert actual == path.read_text(encoding="utf-8")
+        _golden_path(name).write_text(actual, encoding="utf-8")
+    assert actual == _saved(name)
 
 
 @pytest.mark.parametrize(
@@ -63,3 +70,12 @@ def test_the_brief_is_the_same_as_the_saved_copy(name: str, reservations: list[R
 
     _assert_same_as_saved(f"{name}.html", brief.html)
     _assert_same_as_saved(f"{name}.txt", brief.text)
+
+
+@pytest.mark.usefixtures("czech_time_language")
+def test_the_brief_on_a_server_set_to_czech_is_the_same_as_the_saved_copy() -> None:
+    brief = _brief(FULL_WEEK)
+
+    # Only compares, even with UPDATE_GOLDEN set: the saved copies come from the normal case.
+    assert brief.html == _saved("full_week.html")
+    assert brief.text == _saved("full_week.txt")

@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from nano_standup.domain import PRAGUE, Instrument, Reservation, ReservationStatus, Week
+from nano_standup.domain import PRAGUE, Instrument, Reservation, ReservationStatus, Week, day_name
 
 NO_EXPERIMENT_PLAN = "No experiment plan given"
 NO_RESERVATIONS_THIS_WEEK = "No reservations this week."
@@ -68,7 +68,7 @@ class Day:
 
     @property
     def heading(self) -> str:
-        return f"{self.calendar_day:%A} {_day_month(self.calendar_day)}"
+        return f"{day_name(self.calendar_day)} {_day_month(self.calendar_day)}"
 
 
 @dataclass(frozen=True)
@@ -102,7 +102,7 @@ def brief_content(
         week_line=f"{instrument.alias} - Monday {_day_month(week.monday)} to Sunday {_day_month(week.sunday)} {week.sunday.year}",
         counts=_counts(reservations) if reservations else [],
         days=_days(week, reservations) if reservations else [],
-        built=f"Built on {built_local:%A} {_day_month(built_local.date())} {built_local.year} at {built_local:%H:%M}.",
+        built=f"Built on {day_name(built_local.date())} {_day_month(built_local.date())} {built_local.year} at {built_local:%H:%M}.",
     )
 
 
@@ -170,8 +170,8 @@ def _end(reservation: Reservation) -> str:
     if end.date() == start.date():
         return f"{end:%H:%M}"
     if end.date() - start.date() < timedelta(days=7):
-        return f"{end:%a %H:%M}"
-    return f"{end:%a} {_day_month(end.date())} {end:%H:%M}"
+        return f"{_short_day_name(end.date())} {end:%H:%M}"
+    return f"{_short_day_name(end.date())} {_day_month(end.date())} {end:%H:%M}"
 
 
 def _length(reservation: Reservation) -> str:
@@ -199,6 +199,11 @@ def _week_span(week: Week) -> str:
     if monday.month != sunday.month:
         return f"{_day_month(monday)}-{_day_month(sunday)} {sunday.year}"
     return f"{monday.day}.-{_day_month(sunday)} {sunday.year}"
+
+
+def _short_day_name(day: date) -> str:
+    """Short day name, such as "Tue"."""
+    return day_name(day)[:3]
 
 
 def _day_month(day: date) -> str:

@@ -12,6 +12,14 @@ PRAGUE = ZoneInfo("Europe/Prague")
 # Gives the current time with a time zone. Passed in from outside, so tests can fix the time.
 Clock = Callable[[], datetime]
 
+# Day names written out, because `%A` and `%a` follow the server's time language.
+DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+
+def day_name(day: date) -> str:
+    """English day name, such as "Tuesday", on any server time language."""
+    return DAY_NAMES[day.weekday()]
+
 
 def normalize_email(email: str) -> str:
     """Emails match without regard to case or surrounding spaces."""
@@ -75,7 +83,7 @@ class Week:
 
     def __post_init__(self) -> None:
         if self.monday.weekday() != 0:
-            raise ValueError(f"Week must start on a Monday, got {self.monday:%A} {self.monday}")
+            raise ValueError(f"Week must start on a Monday, got {day_name(self.monday)} {self.monday}")
 
     @classmethod
     def containing(cls, day: date) -> "Week":
