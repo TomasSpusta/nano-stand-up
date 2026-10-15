@@ -14,7 +14,7 @@ from nano_standup.domain import (
     WorkingHours,
     day_name,
 )
-from nano_standup.heads_ups import heads_up_rules
+from nano_standup.heads_ups import WAITING_FOR_APPROVAL, heads_up_rules
 
 NO_EXPERIMENT_PLAN = "No experiment plan given"
 NO_RESERVATIONS_THIS_WEEK = "No reservations this week."
@@ -162,17 +162,17 @@ def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
 
     Hours count only inside the week, for a reservation that runs in from the previous week or past Sunday.
     """
-    active = [r for r in reservations if r.will_happen]
-    cancelled = len(reservations) - len(active)
-    requested = sum(1 for r in active if r.status is ReservationStatus.REQUESTED)
-    hours = sum(week.time_inside(r).total_seconds() for r in active) / 3600
+    not_cancelled = [r for r in reservations if r.is_not_cancelled]
+    cancelled = len(reservations) - len(not_cancelled)
+    waiting = sum(1 for r in reservations if WAITING_FOR_APPROVAL.matches(r))
+    hours = sum(week.time_inside(r).total_seconds() for r in not_cancelled) / 3600
     # Reservations with no user id still count each user name once.
-    users = len({r.user_id or r.user_name for r in active})
-    without_experiment_plan = sum(1 for r in reservations if r.will_happen_without_experiment_plan)
+    users = len({r.user_id or r.user_name for r in not_cancelled})
+    without_experiment_plan = sum(1 for r in reservations if r.is_missing_experiment_plan)
     # Shown only when there is something to approve, and first, because it asks the guarantor to act.
-    waiting = [Count(str(requested), "waiting for your approval", needs_action=True)] if requested else []
-    return waiting + [
-        Count(str(len(active)), _plural(len(active), "reservation")),
+    waiting_counts = [Count(str(waiting), WAITING_FOR_APPROVAL.title.lower(), needs_action=True)] if waiting else []
+    return waiting_counts + [
+        Count(str(len(not_cancelled)), _plural(len(not_cancelled), "reservation")),
         Count(f"{_format_hours(hours)} h", "booked"),
         Count(str(users), _plural(users, "user")),
         Count(str(without_experiment_plan), "without an experiment plan"),

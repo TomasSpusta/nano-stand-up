@@ -4,9 +4,10 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from nano_standup.brief import Brief, build_brief
+from nano_standup.brief_content import brief_content
 from nano_standup.domain import ReservationStatus, Week, WorkingHours
 
-from helpers import INSTRUMENT, WORKING_HOURS, reservation, visible_text
+from helpers import INSTRUMENT, WORKING_HOURS, heads_up_text, reservation, visible_text
 
 WEEK = Week(date(2026, 10, 19))
 BUILT_AT = datetime(2026, 10, 19, 8, 0, tzinfo=ZoneInfo("Europe/Prague"))
@@ -446,12 +447,7 @@ def test_a_reservation_that_started_in_an_earlier_year_shows_the_year() -> None:
 
 
 def _heads_up_text(brief: Brief) -> str:
-    """The Heads-up section of the plain-text version, on one line. Checks that the HTML version shows the same."""
-    lines = brief.text.splitlines()
-    start = lines.index("HEADS-UP")
-    section = " ".join(" ".join(lines[start + 1 : lines.index("", start)]).split())
-    assert f"Heads-up {section}" in visible_text(brief.html)
-    return section
+    return heads_up_text(brief.text, brief.html)
 
 
 def test_a_reservation_without_an_experiment_plan_is_a_heads_up() -> None:
@@ -557,6 +553,25 @@ def test_reservations_that_are_neither_cancelled_nor_requested_are_not_heads_ups
 
     assert "Cancelled" not in heads_up
     assert "Waiting for your approval" not in heads_up
+
+
+def test_the_heads_ups_come_in_a_fixed_order_waiting_for_approval_first_and_cancelled_last() -> None:
+    # Given in the opposite order, so the order comes from the rules and not from the reservations.
+    reservations = [
+        reservation("2026-10-19T09:00", "2026-10-19T10:00", status=ReservationStatus.CANCELLED),
+        reservation("2026-10-20T06:00", "2026-10-20T08:00"),
+        reservation("2026-10-21T09:00", "2026-10-21T10:00", experiment_plan=""),
+        reservation("2026-10-22T09:00", "2026-10-22T10:00", status=ReservationStatus.REQUESTED),
+    ]
+
+    content = brief_content(INSTRUMENT, WEEK, reservations, BUILT_AT, WORKING_HOURS)
+
+    assert [heads_up.title for heads_up in content.heads_ups] == [
+        "Waiting for your approval",
+        "No experiment plan",
+        "Outside working hours (07:00 to 19:00, Monday to Friday)",
+        "Cancelled",
+    ]
 
 
 def test_the_heads_ups_come_first_above_the_counts() -> None:

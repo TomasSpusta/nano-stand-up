@@ -109,11 +109,11 @@ def _heads_ups_html(heads_ups: list[HeadsUp]) -> str:
     """The Heads-up section, or nothing when no rule matches."""
     if not heads_ups:
         return ""
-    sections = "".join(_heads_up_html(heads_up) for heads_up in heads_ups)
+    heads_up_blocks = "".join(_heads_up_html(heads_up) for heads_up in heads_ups)
     return (
         f'<div style="background:{AMBER_BACKGROUND};border-left:3px solid {AMBER_TEXT};'
         'border-radius:6px;padding:10px 12px;margin:16px 0 0;font-size:14px;">'
-        f'<div style="font-weight:700;color:{AMBER_TEXT};">Heads-up</div>{sections}</div>'
+        f'<div style="font-weight:700;color:{AMBER_TEXT};">Heads-up</div>{heads_up_blocks}</div>'
     )
 
 

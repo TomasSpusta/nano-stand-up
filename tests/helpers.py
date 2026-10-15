@@ -50,3 +50,12 @@ def visible_text(html: str) -> str:
     collector = _TextCollector()
     collector.feed(html)
     return " ".join(" ".join(collector.parts).split())
+
+
+def heads_up_text(text: str, html: str) -> str:
+    """The Heads-up section of the plain-text version, on one line. Checks that the HTML version shows the same."""
+    lines = text.splitlines()
+    start = lines.index("HEADS-UP")
+    section = " ".join(" ".join(lines[start + 1 : lines.index("", start)]).split())
+    assert f"Heads-up {section}" in visible_text(html)
+    return section
