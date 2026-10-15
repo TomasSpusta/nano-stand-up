@@ -18,7 +18,11 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra"
+# The live API check is opt-in: `-m live_api` on the command line comes after addopts, so it wins.
+addopts = "-ra -m 'not live_api'"
+markers = [
+    "live_api: reads the live booking API; needs the booking settings in the environment (see README)",
+]
 
 [tool.mypy]
 strict = true
@@ -45,4 +49,4 @@ select = ["F", "E", "W", "I", "B", "UP", "SIM"]
 
 [tool.ruff.lint.isort]
 # Shared test modules in tests/; keep them in their own group after the project imports.
-known-local-folder = ["fake_booking_api", "helpers", "local_booking_server"]
+known-local-folder = ["fake_booking_api", "helpers", "local_booking_server", "live_api_safety"]
