@@ -1,11 +1,8 @@
 import dataclasses
-import smtplib
-from email.message import EmailMessage
-from types import TracebackType
-
-import pytest
 
 from nano_standup.mail import Message, SmtpMailSender, SmtpSettings
+
+from helpers import FakeSmtpServer
 
 MESSAGE = Message(
     from_address="standup@example.org",
@@ -16,49 +13,10 @@ MESSAGE = Message(
 )
 
 
-class FakeSmtp:
-    """Stands in for smtplib.SMTP, the network edge, and records the calls in order."""
-
-    instances: list["FakeSmtp"] = []
-
-    def __init__(self, host: str, port: int, timeout: float) -> None:
-        self.connected_to = (host, port, timeout)
-        self.calls: list[str] = []
-        self.login_args: tuple[str, str] | None = None
-        self.sent: list[EmailMessage] = []
-        FakeSmtp.instances.append(self)
-
-    def __enter__(self) -> "FakeSmtp":
-        return self
-
-    def __exit__(
-        self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None
-    ) -> None:
-        self.calls.append("quit")
-
-    def starttls(self) -> None:
-        self.calls.append("starttls")
-
-    def login(self, user: str, password: str) -> None:
-        self.calls.append("login")
-        self.login_args = (user, password)
-
-    def send_message(self, message: EmailMessage) -> None:
-        self.calls.append("send")
-        self.sent.append(message)
-
-
-@pytest.fixture
-def smtp(monkeypatch: pytest.MonkeyPatch) -> list[FakeSmtp]:
-    FakeSmtp.instances = []
-    monkeypatch.setattr(smtplib, "SMTP", FakeSmtp)
-    return FakeSmtp.instances
-
-
-def test_sends_plain_text_and_html_versions_without_login_or_tls(smtp: list[FakeSmtp]) -> None:
+def test_sends_plain_text_and_html_versions_without_login_or_tls(smtp: FakeSmtpServer) -> None:
     SmtpMailSender(SmtpSettings(host="localhost", port=1025), timeout_seconds=5).send(MESSAGE)
 
-    [server] = smtp
+    [server] = smtp.connections
     assert server.connected_to == ("localhost", 1025, 5)
     assert server.calls == ["send", "quit"]
     [email] = server.sent
@@ -72,39 +30,39 @@ def test_sends_plain_text_and_html_versions_without_login_or_tls(smtp: list[Fake
     assert (rich.get_content_type(), rich.get_content().strip()) == ("text/html", "<p>Hi</p>")
 
 
-def test_starts_tls_then_logs_in_before_sending(smtp: list[FakeSmtp]) -> None:
+def test_starts_tls_then_logs_in_before_sending(smtp: FakeSmtpServer) -> None:
     settings = SmtpSettings(
         host="mail.example.org", port=587, username="standup", password="test-password", starttls=True
     )
 
     SmtpMailSender(settings).send(MESSAGE)
 
-    [server] = smtp
+    [server] = smtp.connections
     assert server.calls == ["starttls", "login", "send", "quit"]
     assert server.login_args == ("standup", "test-password")
 
 
-def test_logs_in_with_an_empty_password_when_none_is_set(smtp: list[FakeSmtp]) -> None:
+def test_logs_in_with_an_empty_password_when_none_is_set(smtp: FakeSmtpServer) -> None:
     SmtpMailSender(SmtpSettings(host="localhost", port=25, username="standup")).send(MESSAGE)
 
-    [server] = smtp
+    [server] = smtp.connections
     assert server.calls == ["login", "send", "quit"]
     assert server.login_args == ("standup", "")
 
 
-def test_a_message_with_an_unsubscribe_link_gets_the_one_click_unsubscribe_headers(smtp: list[FakeSmtp]) -> None:
+def test_a_message_with_an_unsubscribe_link_gets_the_one_click_unsubscribe_headers(smtp: FakeSmtpServer) -> None:
     link = "https://standup.example.org/unsubscribe?token=test-token"
 
     SmtpMailSender(SmtpSettings(host="localhost", port=1025)).send(dataclasses.replace(MESSAGE, unsubscribe_link=link))
 
-    [email] = smtp[0].sent
+    [email] = smtp.connections[0].sent
     assert email["List-Unsubscribe"] == f"<{link}>"
     assert email["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
 
 
-def test_a_message_without_an_unsubscribe_link_gets_no_unsubscribe_headers(smtp: list[FakeSmtp]) -> None:
+def test_a_message_without_an_unsubscribe_link_gets_no_unsubscribe_headers(smtp: FakeSmtpServer) -> None:
     SmtpMailSender(SmtpSettings(host="localhost", port=1025)).send(MESSAGE)
 
-    [email] = smtp[0].sent
+    [email] = smtp.connections[0].sent
     assert email["List-Unsubscribe"] is None
     assert email["List-Unsubscribe-Post"] is None

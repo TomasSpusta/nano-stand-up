@@ -45,7 +45,7 @@ UNSUBSCRIBE_MESSAGES = {
     ),
     UnsubscribeOutcome.ALREADY_UNSUBSCRIBED: (
         "Already unsubscribed",
-        "This brief was already stopped, so nothing changed. If you subscribed again since,"
+        "This subscription has already ended, so nothing changed. If you subscribed again since,"
         " use the unsubscribe link in your latest brief.",
     ),
     UnsubscribeOutcome.UNKNOWN: (

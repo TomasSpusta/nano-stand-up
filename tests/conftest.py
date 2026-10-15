@@ -1,7 +1,10 @@
 import locale
+import smtplib
 from collections.abc import Iterator
 
 import pytest
+
+from helpers import FakeSmtpServer
 
 # The names a Czech time language can have on Linux.
 CZECH_TIME_LANGUAGES = ("cs_CZ.UTF-8", "cs_CZ.utf8")
@@ -23,3 +26,11 @@ def czech_time_language() -> Iterator[None]:
         yield
     finally:
         locale.setlocale(locale.LC_TIME, before)
+
+
+@pytest.fixture
+def smtp(monkeypatch: pytest.MonkeyPatch) -> FakeSmtpServer:
+    """A fake mail server that every smtplib.SMTP connection in the test goes to."""
+    server = FakeSmtpServer()
+    monkeypatch.setattr(smtplib, "SMTP", server.connect)
+    return server

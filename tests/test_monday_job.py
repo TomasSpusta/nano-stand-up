@@ -18,7 +18,7 @@ OTHER = Instrument(
     alias="TEST-LAB",
     guarantor=Guarantor(name="Ota Zkusebni", email="ota.zkusebni@example.org"),
 )
-UNSUBSCRIBE_LINK = re.compile(r"https://standup\.example\.org/unsubscribe\?token=([A-Za-z0-9_-]+)")
+UNSUBSCRIBE_LINK_PATTERN = re.compile(r"https://standup\.example\.org/unsubscribe\?token=([A-Za-z0-9_-]+)")
 
 
 def _run(
@@ -38,7 +38,7 @@ def _run(
 
 def _unsubscribe_token(text: str) -> str:
     """The token of the one unsubscribe link in a brief's plain-text version."""
-    [token] = UNSUBSCRIBE_LINK.findall(text)
+    [token] = UNSUBSCRIBE_LINK_PATTERN.findall(text)
     return str(token)
 
 

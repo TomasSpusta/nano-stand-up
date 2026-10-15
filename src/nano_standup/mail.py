@@ -14,7 +14,7 @@ class Message:
     html: str
     # The same content for mail clients that do not show HTML.
     text: str
-    # A link that ends what the message is about. Mail apps show their own unsubscribe button for it.
+    # The unsubscribe link of the brief in the message, if any. Mail apps show their own unsubscribe button for it.
     unsubscribe_link: str | None = None
 
 
