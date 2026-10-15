@@ -61,7 +61,7 @@ def _run_monday_job(settings: Settings) -> int:
         SmtpMailSender(settings.smtp),
         clock=system_clock,
         from_address=settings.mail_from,
-        working_hours=settings.working_hours,
+        heads_up_settings=settings.heads_up,
     )
     log.info("Monday job done: %d briefs sent", sent)
     return 0

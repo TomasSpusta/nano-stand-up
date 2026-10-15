@@ -1,13 +1,35 @@
 """Test helpers and made-up fixtures. Never put real data from the booking system here: the repo is public."""
 
-from datetime import datetime, time
+from collections.abc import Iterable
+from datetime import date, datetime, time, timedelta
 from html.parser import HTMLParser
 
-from nano_standup.domain import Guarantor, Instrument, Reservation, ReservationStatus, WorkingHours
+from nano_standup.domain import (
+    Certificate,
+    Guarantor,
+    Instrument,
+    Reservation,
+    ReservationStatus,
+    UserFacts,
+    WorkingHours,
+)
+from nano_standup.heads_ups import HeadsUpSettings
 
-GUARANTOR = Guarantor(name="Hana Testova", email="hana.testova@example.org")
+# The user id follows the scheme of `reservation()`, so `reservation(..., user_name="Hana Testova")` is hers.
+GUARANTOR_USER_ID = "user-Hana Testova"
+GUARANTOR = Guarantor(name="Hana Testova", email="hana.testova@example.org", user_id=GUARANTOR_USER_ID)
 INSTRUMENT = Instrument(id="instr-1", name="Test Electron Microscope", alias="TEST-SEM", guarantor=GUARANTOR)
 WORKING_HOURS = WorkingHours(time(7, 0), time(19, 0))
+HEADS_UP_SETTINGS = HeadsUpSettings(working_hours=WORKING_HOURS, new_user_reservations=3)
+# Valid from long ago and never ends.
+OLD_CERTIFICATE = Certificate(valid_from=date(2020, 1, 1), valid_to=None)
+# Many reservations long ago, so a user with them is not a new user.
+OLD_RESERVATION_STARTS = [datetime(2021, 1, 4, 9, 0) + timedelta(days=i) for i in range(10)]
+
+
+def experienced_users(reservations: Iterable[Reservation]) -> dict[str, UserFacts]:
+    """Each user holds an old certificate and has many reservations before, so no heads-up rule about users matches."""
+    return {r.user_id: UserFacts([OLD_CERTIFICATE], OLD_RESERVATION_STARTS) for r in reservations}
 
 
 def reservation(

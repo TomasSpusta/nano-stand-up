@@ -1,4 +1,5 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from typing import Any
 
 import pytest
 
@@ -11,10 +12,20 @@ from nano_standup.booking_api import (
     BookingDataError,
 )
 from nano_standup.booking_source import InstrumentNotFound
-from nano_standup.domain import Guarantor, ReservationStatus, Week
+from nano_standup.domain import Certificate, Guarantor, ReservationStatus, UserFacts, Week
 
 from fake_booking_api import SEM_ID as SEM
-from fake_booking_api import FakeBookingApi, guarantor_json, instrument_json, recording, reservation_json, sem_json
+from fake_booking_api import (
+    FakeBookingApi,
+    certificate_json,
+    contact_json,
+    guarantor_json,
+    instrument_json,
+    recording,
+    reservation_json,
+    sem_json,
+    session_json,
+)
 
 LAB = "equip-lab"
 WEEK = Week(date(2026, 10, 19))
@@ -36,7 +47,7 @@ def test_get_instrument_returns_its_names_and_guarantor_first_name_first(api: Fa
     instrument = ApiBookingSource(api).get_instrument(SEM)
 
     assert (instrument.id, instrument.name, instrument.alias) == (SEM, "Test Electron Microscope", "TEST-SEM")
-    assert instrument.guarantor == Guarantor("Hana Testova", "Hana.Testova@example.org")
+    assert instrument.guarantor == Guarantor("Hana Testova", "Hana.Testova@example.org", "contact-Hana-Testova")
 
 
 def test_get_instrument_uses_the_czech_name_when_there_is_no_english_one(api: FakeBookingApi) -> None:
@@ -256,3 +267,125 @@ def test_get_reservations_logs_an_unknown_status_and_shows_it_as_reserved(
 
     assert reservation.status is ReservationStatus.RESERVED
     assert f"Reservation r1 has an unknown statuscode {UNKNOWN_STATUS}" in caplog.text
+
+
+JANA = "contact-Jana-Smyslena"
+
+
+def _jana_json(
+    id: str, instrument_id: str, start: str, statuscode: int = RESERVED_STATUS
+) -> dict[str, Any]:  # Any: mirrors the API's JSON.
+    """A one-hour reservation by Jana Smyslena."""
+    end = (datetime.fromisoformat(start) + timedelta(hours=1)).isoformat()
+    return reservation_json(id, instrument_id, start, end, firstname="Jana", lastname="Smyslena", statuscode=statuscode)
+
+
+def test_get_instrument_gives_the_guarantor_user_id(api: FakeBookingApi) -> None:
+    assert ApiBookingSource(api).get_instrument(SEM).guarantor.user_id == "contact-Hana-Testova"
+
+
+def test_get_instrument_logs_a_guarantor_without_a_contact_and_gives_no_user_id(
+    api: FakeBookingApi, caplog: pytest.LogCaptureFixture
+) -> None:
+    del api.instruments[SEM]["ge_ownerid"]["ge_contactid"]
+
+    instrument = ApiBookingSource(api).get_instrument(SEM)
+
+    assert instrument.guarantor.user_id is None
+    assert "TEST-SEM" in caplog.text
+    assert "no contact" in caplog.text
+
+
+def test_get_certificates_reads_them_through_the_user_system_user(api: FakeBookingApi) -> None:
+    api.contacts[JANA] = contact_json(JANA, "sysuser-jana")
+    api.certificates[("sysuser-jana", SEM)] = [
+        certificate_json("2024-04-23T00:00:00", "2027-04-23T00:00:00"),
+        certificate_json("2026-02-05T00:00:00", None),
+    ]
+    api.certificates[("sysuser-jana", LAB)] = [certificate_json("2020-01-01T00:00:00", None)]
+
+    certificates = ApiBookingSource(api).get_certificates(SEM, JANA)
+
+    assert certificates == [
+        Certificate(valid_from=date(2024, 4, 23), valid_to=date(2027, 4, 23)),
+        Certificate(valid_from=date(2026, 2, 5), valid_to=None),
+    ]
+
+
+def test_get_certificates_reads_them_all_in_one_request_because_the_api_ignores_paging(
+    api: FakeBookingApi,
+) -> None:
+    api.contacts[JANA] = contact_json(JANA, "sysuser-jana")
+    api.certificates[("sysuser-jana", SEM)] = [
+        certificate_json(f"20{10 + i // 12}-{1 + i % 12:02}-01T00:00:00", None) for i in range(60)
+    ]
+
+    assert len(ApiBookingSource(api).get_certificates(SEM, JANA)) == 60
+
+
+def test_a_user_without_a_system_user_has_no_certificates(api: FakeBookingApi) -> None:
+    api.contacts[JANA] = contact_json(JANA, None)
+
+    assert ApiBookingSource(api).get_certificates(SEM, JANA) == []
+
+
+def test_a_certificate_without_a_valid_from_date_is_logged_and_left_out(
+    api: FakeBookingApi, caplog: pytest.LogCaptureFixture
+) -> None:
+    api.contacts[JANA] = contact_json(JANA, "sysuser-jana")
+    api.certificates[("sysuser-jana", SEM)] = [certificate_json(None, "2027-04-23T00:00:00")]
+
+    assert ApiBookingSource(api).get_certificates(SEM, JANA) == []
+    assert f"A certificate of user {JANA} for instrument {SEM} has no valid-from date" in caplog.text
+
+
+def test_a_certificate_date_that_is_not_a_date_is_named(api: FakeBookingApi) -> None:
+    api.contacts[JANA] = contact_json(JANA, "sysuser-jana")
+    api.certificates[("sysuser-jana", SEM)] = [certificate_json("2024-04-23T00:00:00", "soon")]
+
+    with pytest.raises(BookingDataError, match="ge_platnostdo that is not a date and time: 'soon'"):
+        ApiBookingSource(api).get_certificates(SEM, JANA)
+
+
+def test_get_reservation_starts_reads_the_user_sessions_on_the_instrument_without_cancelled_ones(
+    api: FakeBookingApi,
+) -> None:
+    reservations = [
+        _jana_json("old", SEM, "2025-03-11T10:30:00"),
+        _jana_json("this-week", SEM, "2026-10-20T09:00:00"),
+        _jana_json("requested", SEM, "2026-10-21T09:00:00", statuscode=REQUESTED_STATUS),
+        _jana_json("cancelled", SEM, "2026-10-22T09:00:00", statuscode=CANCELLED_STATUS),
+        _jana_json("other-instrument", LAB, "2026-10-23T09:00:00"),
+        reservation_json("other-user", SEM, "2026-10-23T09:00:00", "2026-10-23T10:00:00"),
+    ]
+    api.sessions = [session_json(r, LAB if r["id"] == "other-instrument" else SEM) for r in reservations]
+    # A reservation with two sessions counts once.
+    api.sessions.append({**api.sessions[0], "id": "session-old-2"})
+
+    starts = ApiBookingSource(api).get_reservation_starts(SEM, JANA)
+
+    assert sorted(starts) == [datetime(2025, 3, 11, 10, 30), datetime(2026, 10, 20, 9, 0), datetime(2026, 10, 21, 9, 0)]
+
+
+def test_get_reservation_starts_leaves_out_a_session_without_a_reservation(api: FakeBookingApi) -> None:
+    booked = session_json(_jana_json("booked", SEM, "2026-10-20T09:00:00"), SEM)
+    api.sessions = [booked, {**booked, "id": "session-not-booked", "ge_serviceappointmentid": None}]
+
+    assert ApiBookingSource(api).get_reservation_starts(SEM, JANA) == [datetime(2026, 10, 20, 9, 0)]
+
+
+def test_get_user_facts_gives_the_certificates_and_the_reservation_starts(api: FakeBookingApi) -> None:
+    api.contacts[JANA] = contact_json(JANA, "sysuser-jana")
+    api.certificates[("sysuser-jana", SEM)] = [certificate_json("2024-04-23T00:00:00", None)]
+    api.sessions = [session_json(_jana_json("booked", SEM, "2026-10-20T09:00:00"), SEM)]
+
+    assert ApiBookingSource(api).get_user_facts(SEM, JANA) == UserFacts(
+        certificates=[Certificate(valid_from=date(2024, 4, 23), valid_to=None)],
+        reservation_starts=[datetime(2026, 10, 20, 9, 0)],
+    )
+
+
+def test_get_reservation_starts_reads_every_page_of_50(api: FakeBookingApi) -> None:
+    api.sessions = [session_json(_jana_json(f"r{i}", SEM, f"2025-01-01T09:{i:02}:00"), SEM) for i in range(60)]
+
+    assert len(ApiBookingSource(api).get_reservation_starts(SEM, JANA)) == 60

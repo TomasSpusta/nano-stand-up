@@ -8,6 +8,10 @@ API quirks it hides:
 - Expanding the user on the reservation list fails on some pages, so it loads each matching reservation on its own.
 - The experiment plan is on a recording, which points to a session, which points to the reservation.
 - Filters know only gt and lt, not "greater or equal".
+- A user's certificates hang on their system user, which their contact (the reservation's user) links to.
+  Their endpoint ignores page and limit and always gives the whole list, so it is read once, not page by page.
+- Sessions can be filtered by instrument and by user, though the API spec does not list these filters.
+  A session points to its reservation, so this gives a user's reservations on an instrument.
 """
 
 import json
@@ -21,7 +25,7 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from nano_standup.booking_source import InstrumentNotFound
-from nano_standup.domain import Guarantor, Instrument, Reservation, ReservationStatus, Week
+from nano_standup.domain import Certificate, Guarantor, Instrument, Reservation, ReservationStatus, UserFacts, Week
 
 log = logging.getLogger(__name__)
 
@@ -109,11 +113,22 @@ class ApiBookingSource:
         email = (guarantor_json.get("internalemailaddress") or "").strip()
         if not email:
             raise BookingDataError(f"Instrument {alias} ({instrument_id}) has no guarantor email in the booking system")
+        # The guarantor's contact is their user id on reservations.
+        user_id = (guarantor_json.get("ge_contactid") or {}).get("id") or None
+        if user_id is None:
+            log.warning(
+                "The guarantor of instrument %s (%s) has no contact in the booking system; "
+                "their own reservations get the certificate heads-up",
+                alias,
+                instrument_id,
+            )
         return Instrument(
             id=_required(item, "id", f"Instrument {alias} ({instrument_id})"),
             name=item.get("ge_nameen") or item.get("name") or alias,
             alias=alias,
-            guarantor=Guarantor(name=_person_name(guarantor_json) or guarantor_json.get("fullname") or "", email=email),
+            guarantor=Guarantor(
+                name=_person_name(guarantor_json) or guarantor_json.get("fullname") or "", email=email, user_id=user_id
+            ),
         )
 
     def get_reservations(self, instrument_id: str, week: Week) -> list[Reservation]:
@@ -139,6 +154,50 @@ class ApiBookingSource:
         windows = [(week.start, week.end)] + [(start, start) for start in starts_before]
         experiment_plans = self._experiment_plans(windows)
         return [replace(r, experiment_plan=experiment_plans.get(r.id, "")) for r in reservations]
+
+    def get_user_facts(self, instrument_id: str, user_id: str) -> UserFacts:
+        return UserFacts(
+            certificates=self.get_certificates(instrument_id, user_id),
+            reservation_starts=self.get_reservation_starts(instrument_id, user_id),
+        )
+
+    def get_certificates(self, instrument_id: str, user_id: str) -> list[Certificate]:
+        """The user's certificates for the instrument, valid or not, through the system user of their contact."""
+        contact = self._api.get(f"/api/contact/{urllib.parse.quote(user_id)}", {})
+        system_user_id = (contact.get("ge_systemuserid") or {}).get("id")
+        if not system_user_id:
+            # Only a user who can log in to the booking system has a system user, and so a certificate.
+            return []
+        path = (
+            f"/api/system-user/{urllib.parse.quote(system_user_id)}"
+            f"/equipment/{urllib.parse.quote(instrument_id)}/certificates"
+        )
+        what = f"A certificate of user {user_id} for instrument {instrument_id}"
+        certificates = []
+        # One request: this endpoint ignores paging, so reading page after page would never end.
+        for item in self._api.get(path, {}):
+            if not item.get("ge_platnostod"):
+                log.warning("%s has no valid-from date; the heads-up rules leave it out", what)
+                continue
+            valid_to = _local_time(item, "ge_platnostdo", what).date() if item.get("ge_platnostdo") else None
+            certificates.append(Certificate(_local_time(item, "ge_platnostod", what).date(), valid_to))
+        return certificates
+
+    def get_reservation_starts(self, instrument_id: str, user_id: str) -> list[datetime]:
+        """When the user's reservations on the instrument start, from any time, without cancelled ones."""
+        filters = [f"ge_equipmentid:eq:{instrument_id}", f"ge_realised_for_contactid:eq:{user_id}"]
+        # By reservation id: a reservation with several sessions counts once.
+        starts: dict[str, datetime] = {}
+        for session in self._pages("/api/session", filters, scope="ge_serviceappointmentid"):
+            reservation = session.get("ge_serviceappointmentid")
+            if not reservation:
+                # Not booked through a reservation, so it is not one of the user's reservations.
+                continue
+            reservation_id = _required(reservation, "id", f"The reservation of session {session.get('id')}")
+            what = f"Reservation {reservation_id}"
+            if _status(reservation, what) is not ReservationStatus.CANCELLED:
+                starts[reservation_id] = _local_time(reservation, "scheduledstart", what)
+        return list(starts.values())
 
     def _experiment_plans(self, windows: list[tuple[datetime, datetime]]) -> dict[str, str]:
         """Experiment plan by reservation id, for the reservations that start inside one of the windows."""
