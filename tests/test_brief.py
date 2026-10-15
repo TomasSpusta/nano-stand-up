@@ -408,3 +408,11 @@ def test_the_html_version_keeps_the_start_day_and_time_together() -> None:
     html = build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html
 
     assert "from Sun&nbsp;22:00 to 06:00" in html
+
+
+def test_a_reservation_that_started_in_an_earlier_year_shows_the_year() -> None:
+    reservations = [reservation("2024-01-04T09:00", "2026-10-19T10:00")]
+
+    text = visible_text(build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT).html)
+
+    assert "Monday 19. 10. from Thu 4. 1. 2024 09:00 to 10:00" in text

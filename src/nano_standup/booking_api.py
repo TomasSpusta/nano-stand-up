@@ -34,6 +34,8 @@ PAGE_SIZE = 50
 RESERVED_STATE, RESERVED_STATUS = 3, 4
 REQUESTED_STATE, REQUESTED_STATUS = 0, 1
 CANCELLED_STATE, CANCELLED_STATUS = 2, 9
+# How filters write a time: Prague local time without a time zone.
+API_TIME = "%Y-%m-%dT%H:%M:%S"
 # A recording starts about when its reservation does. One day of margin each side is enough to find it.
 RECORDING_MARGIN = timedelta(days=1)
 
@@ -117,7 +119,7 @@ class ApiBookingSource:
     def get_reservations(self, instrument_id: str, week: Week) -> list[Reservation]:
         ids = [
             _required(item, "id", "A reservation in the list")
-            for item in self._pages("/api/service-appointment", _overlapping(week), scope="activity_parties")
+            for item in self._pages("/api/service-appointment", _overlap_filters(week), scope="activity_parties")
             if any((party.get("partyid") or {}).get("id") == instrument_id for party in item.get("activity_parties") or [])
         ]
         if not ids:
@@ -160,14 +162,14 @@ class ApiBookingSource:
             page += 1
 
 
-def _overlapping(week: Week) -> list[str]:
+def _overlap_filters(week: Week) -> list[str]:
     """Reservations with some time inside the week. One that ends exactly at Monday 00:00 is left out."""
-    return [f"scheduledstart:lt:{week.end:%Y-%m-%dT%H:%M:%S}", f"scheduledend:gt:{week.start:%Y-%m-%dT%H:%M:%S}"]
+    return [f"scheduledstart:lt:{week.end:{API_TIME}}", f"scheduledend:gt:{week.start:{API_TIME}}"]
 
 
 def _time_window(field: str, start: datetime, end: datetime) -> list[str]:
     """From start (included) to end (left out). The API has no "greater or equal", so start goes back one second."""
-    return [f"{field}:gt:{start - timedelta(seconds=1):%Y-%m-%dT%H:%M:%S}", f"{field}:lt:{end:%Y-%m-%dT%H:%M:%S}"]
+    return [f"{field}:gt:{start - timedelta(seconds=1):{API_TIME}}", f"{field}:lt:{end:{API_TIME}}"]
 
 
 def _reservation(item: dict[str, Any]) -> Reservation:  # Any: parsed JSON.

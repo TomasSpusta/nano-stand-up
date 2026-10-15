@@ -179,12 +179,16 @@ def _comparable(text: str) -> str:
 
 
 def _time_seen_from(moment: datetime, day: date) -> str:
-    """"11:00" on `day`. On another day it shows the day, "Tue 13:00", and the date too when a week or more away."""
+    """"11:00" on `day`. On another day it shows the day, "Tue 13:00", and the date too when a week or more away.
+
+    The date has the year when it is not the year of `day`: "Thu 4. 1. 2024 09:00".
+    """
     if moment.date() == day:
         return f"{moment:%H:%M}"
     if abs(moment.date() - day) < timedelta(days=7):
         return f"{_short_day_name(moment.date())} {moment:%H:%M}"
-    return f"{_short_day_name(moment.date())} {_day_month(moment.date())} {moment:%H:%M}"
+    year = f" {moment.year}" if moment.year != day.year else ""
+    return f"{_short_day_name(moment.date())} {_day_month(moment.date())}{year} {moment:%H:%M}"
 
 
 def _length(reservation: Reservation) -> str:
