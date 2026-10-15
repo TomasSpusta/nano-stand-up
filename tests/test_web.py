@@ -73,20 +73,14 @@ class Site:
         token = self.store.unsubscribe_token(subscription, self.clock())
         return unsubscribe_link_for(BASE_URL, token).removeprefix(BASE_URL)
 
-    def press_unsubscribe(self, link: str) -> Response:
-        """What a person does: open the link, then press the button on the page."""
-        token = link.partition("token=")[2]
+    def press_button(self, link: str) -> Response:
+        """What a person does: open a confirm or unsubscribe link, then press the button on the page."""
+        path, _, query = link.partition("?")
+        token = query.partition("token=")[2]
         page = self.client.get(link).text
         assert f'value="{token}"' in page
-        assert 'action="unsubscribe"' in page
-        response: Response = self.client.post("/unsubscribe", data={"token": token})
-        return response
-
-    def press_confirm(self, link: str) -> Response:
-        """What a person does: open the link, then press the button on the page."""
-        token = link.partition("token=")[2]
-        assert f'value="{token}"' in self.client.get(link).text
-        response: Response = self.client.post("/confirm", data={"token": token})
+        assert f'action="{path.removeprefix("/")}"' in page
+        response: Response = self.client.post(path, data={"token": token})
         return response
 
 
@@ -295,7 +289,7 @@ def test_opening_the_confirm_link_does_not_use_it(site: Site) -> None:
 def test_pressing_confirm_makes_the_subscription_active(site: Site) -> None:
     site.subscribe(INSTRUMENT.id, GUARANTOR.email)
 
-    response = site.press_confirm(site.confirm_link())
+    response = site.press_button(site.confirm_link())
 
     assert response.status_code == 200
     assert "Your subscription is active" in visible_text(response.text)
@@ -305,7 +299,7 @@ def test_pressing_confirm_makes_the_subscription_active(site: Site) -> None:
 def test_a_used_confirm_link_shows_a_clear_message(site: Site) -> None:
     site.subscribe(INSTRUMENT.id, GUARANTOR.email)
     link = site.confirm_link()
-    site.press_confirm(link)
+    site.press_button(link)
     token = link.partition("token=")[2]
 
     opened = site.client.get(link)
@@ -352,8 +346,8 @@ def test_signing_up_twice_for_the_same_instrument_keeps_one_subscription(site: S
     site.subscribe(INSTRUMENT.id, GUARANTOR.email.upper())
     second = site.confirm_link()
 
-    site.press_confirm(first)
-    site.press_confirm(second)
+    site.press_button(first)
+    site.press_button(second)
 
     assert first != second
     assert site.store.list_active() == [Subscription(INSTRUMENT.id, GUARANTOR.email)]
@@ -381,7 +375,7 @@ def test_pressing_unsubscribe_ends_only_that_subscription(site: Site) -> None:
     lab = site.store.add_active(OTHER.id, GUARANTOR.email, NOW)
     someone_else = site.store.add_active(INSTRUMENT.id, "ota.zkusebni@example.org", NOW)
 
-    response = site.press_unsubscribe(site.unsubscribe_link(sem))
+    response = site.press_button(site.unsubscribe_link(sem))
 
     assert response.status_code == 200
     assert "You are unsubscribed" in visible_text(response.text)
@@ -390,7 +384,7 @@ def test_pressing_unsubscribe_ends_only_that_subscription(site: Site) -> None:
 
 def test_an_unsubscribe_link_used_again_says_already_unsubscribed(site: Site) -> None:
     link = site.unsubscribe_link(site.store.add_active(INSTRUMENT.id, GUARANTOR.email, NOW))
-    site.press_unsubscribe(link)
+    site.press_button(link)
 
     opened = site.client.get(link)
     pressed = site.client.post("/unsubscribe", data={"token": link.partition("token=")[2]})
@@ -404,7 +398,7 @@ def test_an_unsubscribe_link_used_again_says_already_unsubscribed(site: Site) ->
 def test_the_unsubscribe_link_of_an_older_brief_says_already_unsubscribed(site: Site) -> None:
     sem = site.store.add_active(INSTRUMENT.id, GUARANTOR.email, NOW)
     older = site.unsubscribe_link(sem)
-    site.press_unsubscribe(site.unsubscribe_link(sem))
+    site.press_button(site.unsubscribe_link(sem))
 
     response = site.client.get(older)
 

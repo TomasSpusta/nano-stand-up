@@ -32,15 +32,13 @@ from nano_standup.web_pages import (
 
 log = logging.getLogger(__name__)
 
-CONFIRM_STATUS = {
+OUTCOME_STATUS: dict[ConfirmOutcome | UnsubscribeOutcome, int] = {
     ConfirmOutcome.CONFIRMED: 200,
     ConfirmOutcome.READY: 200,
     ConfirmOutcome.EXPIRED: 410,
     ConfirmOutcome.USED: 410,
     ConfirmOutcome.UNKNOWN: 404,
-}
-# "Already unsubscribed" is a normal answer, not an error: the guarantor gets what they asked for.
-UNSUBSCRIBE_STATUS = {
+    # "Already unsubscribed" is a normal answer, not an error: the guarantor gets what they asked for.
     UnsubscribeOutcome.UNSUBSCRIBED: 200,
     UnsubscribeOutcome.READY: 200,
     UnsubscribeOutcome.ALREADY_UNSUBSCRIBED: 200,
@@ -112,7 +110,7 @@ def create_app(
         """Shows the Confirm button, or at once why the link cannot be used. It never uses the token."""
         outcome = store.check(token, clock())
         page = confirm_button_page(token) if outcome is ConfirmOutcome.READY else confirm_page(outcome)
-        return HTMLResponse(page, status_code=CONFIRM_STATUS[outcome])
+        return HTMLResponse(page, status_code=OUTCOME_STATUS[outcome])
 
     @app.post("/confirm", response_class=HTMLResponse)
     def confirm(token: Annotated[str, Form()] = "") -> HTMLResponse:
@@ -123,14 +121,14 @@ def create_app(
                 result.subscription.email,
                 result.subscription.instrument_id,
             )
-        return HTMLResponse(confirm_page(result.outcome), status_code=CONFIRM_STATUS[result.outcome])
+        return HTMLResponse(confirm_page(result.outcome), status_code=OUTCOME_STATUS[result.outcome])
 
     @app.get("/unsubscribe", response_class=HTMLResponse)
     def show_unsubscribe(token: str = "") -> HTMLResponse:
         """Shows the Unsubscribe button, or at once why the link cannot be used. It never uses the token."""
         outcome = store.check_unsubscribe(token)
         page = unsubscribe_button_page(token) if outcome is UnsubscribeOutcome.READY else unsubscribe_page(outcome)
-        return HTMLResponse(page, status_code=UNSUBSCRIBE_STATUS[outcome])
+        return HTMLResponse(page, status_code=OUTCOME_STATUS[outcome])
 
     @app.post("/unsubscribe", response_class=HTMLResponse)
     def unsubscribe(
@@ -146,6 +144,6 @@ def create_app(
                 result.subscription.email,
                 result.subscription.instrument_id,
             )
-        return HTMLResponse(unsubscribe_page(result.outcome), status_code=UNSUBSCRIBE_STATUS[result.outcome])
+        return HTMLResponse(unsubscribe_page(result.outcome), status_code=OUTCOME_STATUS[result.outcome])
 
     return app

@@ -101,8 +101,7 @@ def confirm_button_page(token: str) -> str:
 
 def confirm_page(outcome: ConfirmOutcome) -> str:
     """The message for an outcome of `SubscriptionStore.confirm` or `check`, other than READY."""
-    title, text = CONFIRM_MESSAGES[outcome]
-    return _page(title, f"<p>{escape(text)}</p>")
+    return _message_page(*CONFIRM_MESSAGES[outcome])
 
 
 def unsubscribe_button_page(token: str) -> str:
@@ -119,8 +118,7 @@ def unsubscribe_button_page(token: str) -> str:
 
 def unsubscribe_page(outcome: UnsubscribeOutcome) -> str:
     """The message for an outcome of `SubscriptionStore.unsubscribe` or `check_unsubscribe`, other than READY."""
-    title, text = UNSUBSCRIBE_MESSAGES[outcome]
-    return _page(title, f"<p>{escape(text)}</p>")
+    return _message_page(*UNSUBSCRIBE_MESSAGES[outcome])
 
 
 def unavailable_page() -> str:
@@ -128,6 +126,10 @@ def unavailable_page() -> str:
         "Please try again later",
         "<p>This page cannot reach the booking system right now. Please try again in a few minutes.</p>",
     )
+
+
+def _message_page(title: str, text: str) -> str:
+    return _page(title, f"<p>{escape(text)}</p>")
 
 
 def _page(title: str, body: str) -> str:
