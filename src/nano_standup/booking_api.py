@@ -10,6 +10,7 @@ API quirks it hides:
 - Filters know only gt and lt, not "greater or equal".
 """
 
+import http.client
 import json
 import logging
 import urllib.error
@@ -90,6 +91,12 @@ class HttpBookingApi:
         except (urllib.error.URLError, TimeoutError) as error:
             reason = error.reason if isinstance(error, urllib.error.URLError) else error
             raise BookingApiError(path, None, str(reason)) from error
+        except http.client.HTTPException as error:
+            # Such as an answer cut off before its end.
+            raise BookingApiError(path, None, repr(error)) from error
+        except ValueError as error:
+            # Such as a proxy's HTML error page instead of the API's JSON.
+            raise BookingApiError(path, None, f"the answer is not JSON: {error}") from error
 
 
 class ApiBookingSource:

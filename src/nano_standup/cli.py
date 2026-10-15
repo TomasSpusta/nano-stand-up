@@ -14,6 +14,7 @@ from nano_standup.config import ConfigError, Settings, load_settings
 from nano_standup.domain import Clock
 from nano_standup.mail import SmtpMailSender
 from nano_standup.monday_job import Sleep, run_monday_job
+from nano_standup.run_lock import AlreadyRunning, run_lock
 from nano_standup.sent_briefs import SentBriefStore
 from nano_standup.service_admin import NotTheGuarantor, add_subscription
 from nano_standup.subscriptions import SubscriptionStore
@@ -27,6 +28,8 @@ EXIT_INPUT_ERROR = 2
 # The Monday job ended with briefs not sent, or sent but not recorded.
 # The service admin got an error report, if the mail server took it.
 EXIT_BRIEFS_NOT_SENT = 3
+# Another Monday job is still running, so this one sent nothing.
+EXIT_ALREADY_RUNNING = 4
 
 
 def system_clock() -> datetime:
@@ -59,6 +62,9 @@ def main(argv: list[str] | None = None, clock: Clock = system_clock, sleep: Slee
     except (ConfigError, InstrumentNotFound, NotTheGuarantor) as error:
         log.error("%s", error)
         return EXIT_INPUT_ERROR
+    except AlreadyRunning as error:
+        log.error("%s. This run sends nothing.", error)
+        return EXIT_ALREADY_RUNNING
     except Exception:
         log.exception("%s failed", args.command)
         return EXIT_UNEXPECTED_ERROR
@@ -72,17 +78,19 @@ def _add_subscription(settings: Settings, instrument_id: str, email: str, clock:
 
 def _run_monday_job(settings: Settings, clock: Clock, sleep: Sleep) -> int:
     subscriptions = _store(settings)
-    result = run_monday_job(
-        _booking_source(settings),
-        subscriptions,
-        SentBriefStore(settings.database_path),
-        SmtpMailSender(settings.smtp),
-        clock=clock,
-        sleep=sleep,
-        from_address=settings.mail_from,
-        service_admin_email=settings.service_admin_email,
-        working_hours=settings.working_hours,
-    )
+    database = settings.database_path
+    with run_lock(database.with_name(f"{database.name}.monday-job.lock")):
+        result = run_monday_job(
+            _booking_source(settings),
+            subscriptions,
+            SentBriefStore(database),
+            SmtpMailSender(settings.smtp),
+            clock=clock,
+            sleep=sleep,
+            from_address=settings.mail_from,
+            service_admin_email=settings.service_admin_email,
+            working_hours=settings.working_hours,
+        )
     return EXIT_BRIEFS_NOT_SENT if result.failed or result.not_recorded else 0
 
 

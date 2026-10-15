@@ -1,3 +1,9 @@
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+
 import pytest
 
 from nano_standup.booking_api import BookingApiError, BookingDataError, HttpBookingApi
@@ -55,4 +61,49 @@ def test_a_login_answer_without_a_token_names_the_request() -> None:
         api = HttpBookingApi(server.url, API_KEY)
 
         with pytest.raises(BookingDataError, match="/api/login.*accessToken"):
+            api.get("/api/equipment/equip-sem", {})
+
+
+@contextmanager
+def _raw_server(body: bytes, content_length: int) -> Iterator[str]:
+    """A server on localhost that answers every request with the same body, such as a proxy's HTML error page."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, format: str, *args: Any) -> None:  # Any: matches the base class.
+            pass
+
+        def _answer(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Length", str(content_length))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_GET = do_POST = _answer
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_an_answer_that_is_not_json_names_the_request() -> None:
+    page = b"<html>Bad gateway</html>"
+    with _raw_server(page, len(page)) as url:
+        api = HttpBookingApi(url, API_KEY)
+
+        with pytest.raises(BookingApiError, match="/api/login failed: the answer is not JSON"):
+            api.get("/api/equipment/equip-sem", {})
+
+
+def test_a_cut_off_answer_names_the_request() -> None:
+    body = b'{"accessToken": "te'
+    with _raw_server(body, len(body) + 100) as url:
+        api = HttpBookingApi(url, API_KEY)
+
+        with pytest.raises(BookingApiError, match="/api/login failed: IncompleteRead"):
             api.get("/api/equipment/equip-sem", {})

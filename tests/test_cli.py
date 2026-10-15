@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from nano_standup.cli import main
+from nano_standup.run_lock import run_lock
 from nano_standup.subscriptions import Subscription, SubscriptionStore
 
 from fake_booking_api import sem_json
@@ -70,3 +71,24 @@ def test_an_unexpected_failure_exits_with_code_1(tmp_path: Path) -> None:
     (tmp_path / "data").write_text("")
 
     assert main(["--config", str(config), "run-monday-job"]) == 1
+
+
+def test_a_monday_job_started_while_one_runs_exits_with_code_4_and_sends_nothing(tmp_path: Path) -> None:
+    config = write_config(tmp_path, "http://127.0.0.1:1")
+    (tmp_path / "data").mkdir()
+    SubscriptionStore(tmp_path / "data/standup.sqlite3").add_active(
+        "equip-sem", "hana.testova@example.org", datetime(2026, 10, 19, 6, 0, tzinfo=UTC)
+    )
+    tries: list[datetime] = []
+
+    def clock() -> datetime:
+        tries.append(datetime(2026, 10, 19, 6, 0, tzinfo=UTC))
+        return tries[-1]
+
+    # The running job holds this lock.
+    with run_lock(tmp_path / "data/standup.sqlite3.monday-job.lock"):
+        code = main(["--config", str(config), "run-monday-job"], clock=clock, sleep=lambda _: None)
+
+    assert code == 4
+    # Not started at all: it never read the clock.
+    assert tries == []

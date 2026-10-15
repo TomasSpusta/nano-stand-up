@@ -16,7 +16,7 @@ from html import escape
 from nano_standup.booking_api import BookingApiError, BookingDataError
 from nano_standup.booking_source import BookingSource, InstrumentNotFound
 from nano_standup.brief import build_brief
-from nano_standup.domain import PRAGUE, Clock, Week, WorkingHours
+from nano_standup.domain import PRAGUE, Clock, Instrument, Week, WorkingHours
 from nano_standup.mail import MailSender, Message
 from nano_standup.sent_briefs import SentBriefStore
 from nano_standup.subscriptions import Subscription, SubscriptionStore
@@ -30,18 +30,24 @@ RETRY_INTERVAL = timedelta(minutes=15)
 # Prague time. The last try is at this time or just before it; then the service admin gets the error report.
 RETRY_DEADLINE = time(10, 0)
 
-# The failures one brief can have that a later try may not have: the booking API or the mail server is down,
-# or the booking system has an instrument without the data a brief needs. OSError covers all SMTP errors.
-RETRYABLE_ERRORS = (BookingApiError, BookingDataError, OSError)
-# The failures a later try cannot fix, so the brief fails at once.
-PERMANENT_ERRORS = (InstrumentNotFound,)
+# The failures one brief can have that a later try may not have: the booking API or the mail server is down.
+# OSError covers all SMTP errors.
+RETRYABLE_ERRORS = (BookingApiError, OSError)
+# The failures a later try cannot fix, so the brief fails at once: the instrument is gone from the booking system,
+# or it lacks the data a brief needs. Any other, unexpected error fails at once too.
+PERMANENT_ERRORS = (InstrumentNotFound, BookingDataError)
 
 
 @dataclass(frozen=True)
 class BriefFailure:
     subscription: Subscription
+    # The instrument's alias and id when the job could read it, or else only its id.
+    instrument: str
     # The error message of the last try.
     error: str
+
+    def describe(self) -> str:
+        return f"{self.instrument} to {self.subscription.email}"
 
 
 @dataclass(frozen=True)
@@ -80,8 +86,8 @@ def run_monday_job(
     to_send = [s for s in active if not sent_briefs.was_sent(s, week)]
 
     outcome = _send_with_retries(sender, to_send, clock, sleep, deadline)
-    sent = len(to_send) - len(outcome.failed)
-    already_sent = len(active) - len(to_send)
+    sent = len(to_send) - len(outcome.failed) - outcome.sent_by_another_run
+    already_sent = len(active) - len(to_send) + outcome.sent_by_another_run
     if outcome.failed or outcome.not_recorded:
         _send_error_report(mail_sender, from_address, service_admin_email, week, outcome)
     log.info(
@@ -104,10 +110,12 @@ def run_monday_job(
 
 @dataclass
 class _Outcome:
-    """What went wrong in one or more passes over the briefs."""
+    """What did not go as planned in one or more passes over the briefs."""
 
     failed: list[BriefFailure] = field(default_factory=list)
     not_recorded: list[BriefFailure] = field(default_factory=list)
+    # Briefs another run sent after this run started, so this run did not send them.
+    sent_by_another_run: int = 0
 
 
 def _send_with_retries(
@@ -149,26 +157,44 @@ class _BriefSender:
         """
         to_retry = []
         for subscription in subscriptions:
+            instrument_name = subscription.instrument_id
             try:
-                self.send(subscription)
+                instrument = self.source.get_instrument(subscription.instrument_id)
+                instrument_name = instrument.label
+                if not self.send(subscription, instrument):
+                    outcome.sent_by_another_run += 1
             except PERMANENT_ERRORS as error:
-                log.error("Brief for %s failed, not trying again: %s", _describe(subscription), error)
-                outcome.failed.append(BriefFailure(subscription, str(error)))
+                failure = BriefFailure(subscription, instrument_name, str(error))
+                log.error("Brief for %s failed, not trying again: %s", failure.describe(), error)
+                outcome.failed.append(failure)
             except RETRYABLE_ERRORS as error:
-                log.error("Brief for %s failed: %s", _describe(subscription), error)
-                to_retry.append(BriefFailure(subscription, str(error)))
+                failure = BriefFailure(subscription, instrument_name, str(error))
+                log.error("Brief for %s failed: %s", failure.describe(), error)
+                to_retry.append(failure)
             except _NotRecorded as error:
-                outcome.not_recorded.append(BriefFailure(subscription, str(error.__cause__)))
+                outcome.not_recorded.append(BriefFailure(subscription, instrument_name, str(error.__cause__)))
+            # Catch-all: "Catch what you expect" allows one where it keeps the service running. Here it keeps
+            # an unexpected error, such as a bug on odd data, from stopping the other briefs and the error report.
+            except Exception as error:
+                failure = BriefFailure(subscription, instrument_name, f"{type(error).__name__}: {error}")
+                log.exception("Brief for %s failed with an unexpected error, not trying again", failure.describe())
+                outcome.failed.append(failure)
         return to_retry
 
-    def send(self, subscription: Subscription) -> None:
-        """Raises _NotRecorded when the brief went out but the record of sent briefs could not save it."""
-        instrument = self.source.get_instrument(subscription.instrument_id)
+    def send(self, subscription: Subscription, instrument: Instrument) -> bool:
+        """Build, send, and record the brief. False when another run sent it meanwhile, so it was not sent again.
+
+        Raises _NotRecorded when the brief went out but the record of sent briefs could not save it.
+        """
         reservations = self.source.get_reservations(instrument.id, self.week)
         # Built now, not at the start of the run, so a late brief shows when it was really built.
         brief = build_brief(
             instrument, self.week, reservations, built_at=self.clock(), working_hours=self.working_hours
         )
+        # Checked again just before sending: another run may have sent it since this run started.
+        if self.sent_briefs.was_sent(subscription, self.week):
+            log.info("Brief for %s to %s was sent by another run meanwhile", instrument.label, subscription.email)
+            return False
         self.mail_sender.send(
             Message(
                 from_address=self.from_address,
@@ -183,9 +209,13 @@ class _BriefSender:
             self.sent_briefs.record(subscription, self.week, self.clock())
         except sqlite3.Error as error:
             log.error(
-                "Brief for %s sent, but not recorded: a re-run sends it again: %s", _describe(subscription), error
+                "Brief for %s to %s sent, but not recorded: a re-run sends it again: %s",
+                instrument.label,
+                subscription.email,
+                error,
             )
             raise _NotRecorded from error
+        return True
 
 
 class _NotRecorded(Exception):
@@ -211,7 +241,7 @@ def _send_error_report(mail_sender: MailSender, from_address: str, to: str, week
     for failures, label, intro in sections:
         if not failures:
             continue
-        lines = [f"{_describe(f.subscription)}: {f.error}" for f in failures]
+        lines = [f"{f.describe()}: {f.error}" for f in failures]
         subject_parts.append(f"{_count(len(failures), 'brief')} {label}")
         text_parts.append("\n".join([intro, "", *(f"- {line}" for line in lines)]) + "\n")
         html_parts.append(f"<p>{escape(intro)}</p><ul>{''.join(f'<li>{escape(line)}</li>' for line in lines)}</ul>")
@@ -225,10 +255,6 @@ def _send_error_report(mail_sender: MailSender, from_address: str, to: str, week
         log.error("Cannot send the error report to the service admin %s: %s", to, error)
         return
     log.info("Sent the error report to the service admin %s", to)
-
-
-def _describe(subscription: Subscription) -> str:
-    return f"instrument {subscription.instrument_id} to {subscription.email}"
 
 
 def _date(week: Week) -> str:

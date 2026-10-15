@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from nano_standup.booking_api import BookingApiError
+from nano_standup.booking_api import BookingApiError, BookingDataError
 from nano_standup.booking_source import BookingSource, FakeBookingSource
 from nano_standup.domain import Guarantor, Instrument, Reservation, ReservationStatus, Week
 from nano_standup.mail import InMemoryMailSender, MailSender, Message
@@ -416,7 +416,7 @@ def test_a_brief_sent_but_not_recorded_does_not_stop_the_others_and_is_in_the_er
     assert [first.to, second.to] == ["hana.testova@example.org", "ota.zkusebni@example.org"]
     assert error_report.to == "admin@example.org"
     assert error_report.subject == "Nano Stand-up: 1 brief sent but not recorded for the week of 19. 10. 2026"
-    assert "instr-1 to hana.testova@example.org: database is locked" in error_report.text
+    assert "TEST-SEM (instr-1) to hana.testova@example.org: database is locked" in error_report.text
     assert "a re-run sends them again" in error_report.text
     # Sent, so not tried again.
     assert time.now == MONDAY_8AM
@@ -457,4 +457,72 @@ def test_the_error_report_lists_briefs_not_sent_and_briefs_not_recorded(tmp_path
     )
     not_sent, not_recorded = error_report.text.split("sent but not recorded", 1)
     assert "instr-1 to hana.testova@example.org" in not_sent
-    assert "instr-2 to ota.zkusebni@example.org: database is locked" in not_recorded
+    assert "TEST-LAB (instr-2) to ota.zkusebni@example.org: database is locked" in not_recorded
+
+
+class BrokenBookingSource:
+    """The fake booking source, but reading one instrument's reservations raises the given error."""
+
+    def __init__(self, source: FakeBookingSource, broken: str, error: Exception) -> None:
+        self._source = source
+        self._broken = broken
+        self._error = error
+
+    def get_instrument(self, instrument_id: str) -> Instrument:
+        return self._source.get_instrument(instrument_id)
+
+    def get_reservations(self, instrument_id: str, week: Week) -> list[Reservation]:
+        if instrument_id == self._broken:
+            raise self._error
+        return self._source.get_reservations(instrument_id, week)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [RuntimeError("Unexpected bug"), BookingDataError("A reservation has no 'id' in the booking API answer")],
+    ids=["unexpected", "bad data"],
+)
+def test_an_error_a_retry_cannot_fix_goes_straight_to_the_error_report(tmp_path: Path, error: Exception) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    time = FakeTime(MONDAY_8AM)
+    source = BrokenBookingSource(FakeBookingSource(instruments=[INSTRUMENT, OTHER]), INSTRUMENT.id, error)
+    mail_sender = InMemoryMailSender()
+
+    result = _run(source, database, mail_sender, time)
+
+    brief, error_report = mail_sender.sent
+    assert brief.to == "ota.zkusebni@example.org"
+    # The instrument's alias is known here, so the error report names it.
+    assert "TEST-SEM (instr-1) to hana.testova@example.org: " in error_report.text
+    assert str(error) in error_report.text
+    assert time.now == MONDAY_8AM
+    assert (result.sent, len(result.failed)) == (1, 1)
+
+
+class OtherRunMeanwhile(FakeBookingSource):
+    """The fake booking source, but another run sends one brief while this run reads that instrument."""
+
+    def __init__(self, instruments: list[Instrument], sent_briefs: SentBriefStore, sent_by_the_other: str) -> None:
+        super().__init__(instruments)
+        self._sent_briefs = sent_briefs
+        self._sent_by_the_other = sent_by_the_other
+
+    def get_reservations(self, instrument_id: str, week: Week) -> list[Reservation]:
+        if instrument_id == self._sent_by_the_other:
+            subscription = Subscription(instrument_id, "hana.testova@example.org")
+            self._sent_briefs.record(subscription, week, MONDAY_8AM)
+        return super().get_reservations(instrument_id, week)
+
+
+def test_a_brief_another_run_sent_meanwhile_is_not_sent_again(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    sent_briefs = SentBriefStore(database)
+    source = OtherRunMeanwhile([INSTRUMENT, OTHER], sent_briefs, sent_by_the_other=INSTRUMENT.id)
+    mail_sender = InMemoryMailSender()
+
+    result = _run(source, database, mail_sender, sent_briefs=sent_briefs)
+
+    assert [m.to for m in mail_sender.sent] == ["ota.zkusebni@example.org"]
+    assert (result.sent, result.already_sent) == (1, 1)
