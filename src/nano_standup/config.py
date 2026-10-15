@@ -23,6 +23,8 @@ class Settings:
     booking_api_key: str
     smtp: SmtpSettings
     mail_from: str
+    # Gets the error report when briefs still fail at the retry deadline.
+    service_admin_email: str
     database_path: Path
     # The Heads-up section points out reservations outside these hours.
     working_hours: WorkingHours
@@ -77,6 +79,7 @@ def load_settings(path: Path, environ: Mapping[str, str]) -> Settings:
             starttls=starttls_text == "true",
         ),
         mail_from=required("MAIL_FROM"),
+        service_admin_email=required("SERVICE_ADMIN_EMAIL"),
         database_path=path.parent / required("DATABASE_PATH"),
         working_hours=working_hours,
     )

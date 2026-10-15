@@ -13,7 +13,7 @@ def write_config(tmp_path: Path, booking_url: str) -> Path:
     path = tmp_path / ".env"
     path.write_text(
         f"BOOKING_API_BASE_URL={booking_url}\nBOOKING_API_KEY={API_KEY}\n"
-        "SMTP_HOST=127.0.0.1\nSMTP_PORT=1\nMAIL_FROM=standup@example.org\nDATABASE_PATH=data/standup.sqlite3\n"
+        "SMTP_HOST=127.0.0.1\nSMTP_PORT=1\nMAIL_FROM=standup@example.org\nSERVICE_ADMIN_EMAIL=admin@example.org\nDATABASE_PATH=data/standup.sqlite3\n"
     )
     return path
 
