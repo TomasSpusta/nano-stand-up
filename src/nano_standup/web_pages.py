@@ -71,6 +71,24 @@ def confirmed_page() -> str:
     )
 
 
+def not_the_guarantor_page() -> str:
+    """It does not say who the guarantor is now."""
+    return _page(
+        "Subscription not started",
+        "<p>This email is no longer the instrument's guarantor email in the booking system,"
+        " so the subscription did not start.</p>"
+        "<p>If you are the guarantor, check the email the booking system has for you and subscribe again.</p>",
+    )
+
+
+def confirm_unavailable_page() -> str:
+    return _page(
+        "Please try again later",
+        "<p>Your subscription is not confirmed yet: this page cannot reach the booking system right now.</p>"
+        "<p>Your confirm link still works. Please open it again in a few minutes.</p>",
+    )
+
+
 def confirm_problem_page(problem: ConfirmLinkProblem) -> str:
     """Why the confirm link cannot be used."""
     title, text = _confirm_problem_message(problem)

@@ -12,9 +12,10 @@ import uvicorn
 from nano_standup.booking_api import ApiBookingSource, HttpBookingApi
 from nano_standup.booking_source import InstrumentNotFound
 from nano_standup.config import ConfigError, Settings, load_settings
+from nano_standup.domain import NotTheGuarantor
 from nano_standup.mail import SmtpMailSender
 from nano_standup.monday_job import run_monday_job
-from nano_standup.service_admin import NotTheGuarantor, add_subscription
+from nano_standup.service_admin import add_subscription
 from nano_standup.subscription_request import SubscriptionRequests
 from nano_standup.subscriptions import SubscriptionStore
 from nano_standup.web import create_app

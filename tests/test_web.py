@@ -1,4 +1,5 @@
 import re
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -7,7 +8,7 @@ from fastapi.testclient import TestClient
 from httpx import Response
 
 from nano_standup.booking_api import BookingApiError
-from nano_standup.booking_source import BookingSource, FakeBookingSource
+from nano_standup.booking_source import BookingSource, FakeBookingSource, InstrumentNotFound
 from nano_standup.domain import Guarantor, Instrument, InstrumentName, Reservation, Week
 from nano_standup.mail import InMemoryMailSender, MailSender, Message
 from nano_standup.subscription_request import CONFIRM_MAIL_GAP, SubscriptionRequests
@@ -109,6 +110,25 @@ class DownBookingSource:
 
     def get_reservations(self, instrument_id: str, week: Week) -> list[Reservation]:
         raise BookingApiError("/api/service-appointment", None, "Connection refused")
+
+
+class ChangingSource(FakeBookingSource):
+    """A booking system that changes between the steps of a test: the guarantor changes, the instrument leaves it,
+    or its API goes down."""
+
+    def __init__(self) -> None:
+        super().__init__([INSTRUMENT, OTHER])
+        self.guarantor: Guarantor | None = None
+        self.removed = False
+        self.down = False
+
+    def get_instrument(self, instrument_id: str) -> Instrument:
+        if self.down:
+            raise BookingApiError(f"/api/equipment/{instrument_id}", None, "Connection refused")
+        if self.removed:
+            raise InstrumentNotFound(f"No instrument with id {instrument_id!r}")
+        instrument = super().get_instrument(instrument_id)
+        return replace(instrument, guarantor=self.guarantor) if self.guarantor else instrument
 
 
 class BrokenMailSender:
@@ -342,4 +362,60 @@ def test_signing_up_twice_for_the_same_instrument_keeps_one_subscription(site: S
     site.press_confirm(second)
 
     assert first != second
+    assert site.store.list_active() == [Subscription(INSTRUMENT.id, GUARANTOR.email)]
+
+
+def test_pressing_confirm_after_the_guarantor_changed_activates_nothing(tmp_path: Path) -> None:
+    source = ChangingSource()
+    site = Site(tmp_path, source)
+    site.subscribe(INSTRUMENT.id, GUARANTOR.email)
+    source.guarantor = OTHER.guarantor
+
+    response = site.press_confirm(site.confirm_link())
+
+    assert response.status_code == 403
+    assert "no longer the instrument's guarantor email" in visible_text(response.text)
+    # The page does not say who the guarantor is now.
+    assert "zkusebni" not in response.text.lower()
+    assert site.store.list_active() == []
+
+
+def test_pressing_confirm_after_the_instrument_left_the_booking_system_activates_nothing(tmp_path: Path) -> None:
+    source = ChangingSource()
+    site = Site(tmp_path, source)
+    site.subscribe(INSTRUMENT.id, GUARANTOR.email)
+    source.removed = True
+
+    response = site.press_confirm(site.confirm_link())
+
+    assert response.status_code == 403
+    assert site.store.list_active() == []
+
+
+def test_pressing_confirm_works_when_the_guarantor_email_changed_only_its_case(tmp_path: Path) -> None:
+    source = ChangingSource()
+    site = Site(tmp_path, source)
+    site.subscribe(INSTRUMENT.id, GUARANTOR.email)
+    source.guarantor = Guarantor(GUARANTOR.name, " " + GUARANTOR.email.upper())
+
+    response = site.press_confirm(site.confirm_link())
+
+    assert response.status_code == 200
+    assert site.store.list_active() == [Subscription(INSTRUMENT.id, GUARANTOR.email)]
+
+
+def test_pressing_confirm_while_the_booking_system_is_down_keeps_the_link_working(tmp_path: Path) -> None:
+    source = ChangingSource()
+    site = Site(tmp_path, source)
+    site.subscribe(INSTRUMENT.id, GUARANTOR.email)
+    link = site.confirm_link()
+    source.down = True
+
+    down = site.press_confirm(link)
+
+    assert down.status_code == 503
+    assert "try again" in visible_text(down.text)
+    assert site.store.list_active() == []
+    source.down = False
+    assert site.press_confirm(link).status_code == 200
     assert site.store.list_active() == [Subscription(INSTRUMENT.id, GUARANTOR.email)]

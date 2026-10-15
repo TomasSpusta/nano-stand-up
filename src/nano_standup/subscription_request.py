@@ -8,8 +8,17 @@ import logging
 import urllib.parse
 from datetime import datetime, timedelta
 
-from nano_standup.booking_source import BookingSource
-from nano_standup.domain import PRAGUE, Clock, Instrument, InstrumentName, day_name, normalize_email
+from nano_standup.booking_source import BookingSource, InstrumentNotFound
+from nano_standup.domain import (
+    PRAGUE,
+    Clock,
+    Instrument,
+    InstrumentName,
+    NotTheGuarantor,
+    day_name,
+    normalize_email,
+    require_guarantor,
+)
 from nano_standup.instrument_list import InstrumentListCache
 from nano_standup.mail import MailSender, Message
 from nano_standup.subscriptions import ConfirmLinkProblem, Subscription, SubscriptionStore
@@ -84,7 +93,20 @@ class SubscriptionRequests:
         return self._store.check(token, self._clock())
 
     def confirm(self, token: str) -> Subscription | ConfirmLinkProblem:
-        """Make the requested subscription active and return it, or say why the link cannot be used."""
+        """Make the requested subscription active and return it, or say why the link cannot be used.
+
+        The email must still be the instrument's guarantor email in the booking system, as the guarantor may have
+        changed since the link went out. Raises NotTheGuarantor when it is not, and BookingApiError or
+        BookingDataError when the booking system cannot tell. In both cases the link is not used up.
+        """
+        found = self._store.check(token, self._clock())
+        if isinstance(found, ConfirmLinkProblem):
+            return found
+        try:
+            instrument = self._source.get_instrument(found.instrument_id)
+        except InstrumentNotFound as error:
+            raise NotTheGuarantor(f"{found.email!r} is no longer a guarantor email: {error}") from error
+        require_guarantor(instrument, found.email)
         confirmed = self._store.confirm(token, self._clock())
         if isinstance(confirmed, Subscription):
             log.info("Subscription confirmed: %s gets the brief for %s", confirmed.email, confirmed.instrument_id)

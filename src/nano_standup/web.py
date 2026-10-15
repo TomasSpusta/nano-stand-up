@@ -11,14 +11,17 @@ from fastapi.responses import HTMLResponse
 
 from nano_standup.booking_api import BookingApiError, BookingDataError
 from nano_standup.booking_source import InstrumentNotFound
+from nano_standup.domain import NotTheGuarantor
 from nano_standup.subscription_request import SubscriptionRequests
 from nano_standup.subscriptions import ConfirmLinkProblem
 from nano_standup.web_pages import (
     FORM_PROBLEM,
     confirm_button_page,
     confirm_problem_page,
+    confirm_unavailable_page,
     confirmed_page,
     form_page,
+    not_the_guarantor_page,
     requested_page,
     unavailable_page,
 )
@@ -83,7 +86,14 @@ def create_app(requests: SubscriptionRequests) -> FastAPI:
 
     @app.post("/confirm", response_class=HTMLResponse)
     def confirm(token: Annotated[str, Form()] = "") -> HTMLResponse:
-        confirmed = requests.confirm(token)
+        try:
+            confirmed = requests.confirm(token)
+        except NotTheGuarantor as error:
+            log.warning("Subscription not confirmed: %s", error)
+            return HTMLResponse(not_the_guarantor_page(), status_code=403)
+        except (BookingApiError, BookingDataError):
+            log.exception("Cannot check the guarantor to confirm a subscription")
+            return HTMLResponse(confirm_unavailable_page(), status_code=503)
         if isinstance(confirmed, ConfirmLinkProblem):
             return HTMLResponse(confirm_problem_page(confirmed), status_code=confirm_problem_status(confirmed))
         return HTMLResponse(confirmed_page())
