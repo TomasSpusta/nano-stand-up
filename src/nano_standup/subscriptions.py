@@ -54,7 +54,7 @@ class Subscription:
 
 
 @dataclass(frozen=True)
-class PendingSubscription:
+class RequestedSubscription:
     """A requested subscription. The token goes in the confirm link and is not stored."""
 
     token: str
@@ -99,7 +99,7 @@ class SubscriptionStore:
             _activate(db, subscription, now)
         return subscription
 
-    def request(self, instrument_id: str, email: str, now: datetime) -> PendingSubscription:
+    def request(self, instrument_id: str, email: str, now: datetime) -> RequestedSubscription:
         """Request a subscription. It becomes active only when `confirm` gets the returned token in time."""
         token = secrets.token_urlsafe(TOKEN_BYTES)
         expires_at = now + self._confirm_link_lifetime
@@ -109,7 +109,7 @@ class SubscriptionStore:
                 " VALUES (?, ?, ?, ?, ?)",
                 (_hash(token), instrument_id, normalize_email(email), now.isoformat(), expires_at.isoformat()),
             )
-        return PendingSubscription(token, expires_at)
+        return RequestedSubscription(token, expires_at)
 
     def check(self, token: str, now: datetime) -> ConfirmOutcome:
         """What `confirm` would do with the token now, without using it: READY, EXPIRED, USED, or UNKNOWN."""

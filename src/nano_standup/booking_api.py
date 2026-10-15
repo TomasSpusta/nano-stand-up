@@ -7,12 +7,13 @@ API quirks it hides:
 - Expanding activity parties fails on large pages, so it reads pages of 50.
 - Expanding the user on the reservation list fails on some pages, so it loads each matching reservation on its own.
 - The experiment plan is on a recording, which points to a session, which points to the reservation.
-- Filters know only gt and lt, not "greater or equal".
-- The equipment list holds every core facility's equipment, about 1400 items, and reading it all takes about 40 s.
+- Filters know eq, gt and lt, but not "greater or equal".
+- The booking resource list (`/api/equipment`) holds every core facility's booking resources, about 1400 items,
+  and reading it all takes about 40 s.
   Filters on the server cut it to the CF nano instruments in use, about 200, in about 5 s:
-  - CF nano: the equipment's core facility (`ge_corefacilityid`) is the record named CEITECNANO.
+  - CF nano: the booking resource's core facility (`ge_corefacilityid`) is the record named CEITECNANO.
     The filter `ge_corefacilityid.name:eq:CEITECNANO` works, though the API spec does not list it.
-  - In use: not retired (`ge_vyrazen`, "vyřazen"). Out-of-order equipment (`ge_status` 2 or 3) is still in use.
+  - In use: not retired (`ge_vyrazen`, "vyřazen"). An out-of-order instrument (`ge_status` 2 or 3) is still in use.
   - Not a person: most CF nano booking resources (about 1100) are people. No field says so, but every one of them
     is hidden from the planning board (`ge_donotshowinplanningboard`), and the instruments are not.
     The few other hidden items are test records and lab items no one books.
@@ -44,7 +45,7 @@ PAGE_SIZE = 50
 RESERVED_STATE, RESERVED_STATUS = 3, 4
 REQUESTED_STATE, REQUESTED_STATUS = 0, 1
 CANCELLED_STATE, CANCELLED_STATUS = 2, 9
-# The name of the CF nano core facility record, which CF nano equipment links to.
+# The name of the CF nano core facility record, which CF nano booking resources link to.
 CF_NANO_NAME = "CEITECNANO"
 SUBSCRIBABLE_INSTRUMENT_FILTERS = [
     f"ge_corefacilityid.name:eq:{CF_NANO_NAME}",
@@ -120,7 +121,7 @@ class ApiBookingSource:
             _instrument_name(item)
             for item in self._pages("/api/equipment", SUBSCRIBABLE_INSTRUMENT_FILTERS, scope="ge_corefacilityid")
             # The server filter already does this. Checked again because the API spec does not list that filter,
-            # so a server that starts to ignore it cannot let in another facility's equipment.
+            # so a server that starts to ignore it cannot let in another facility's booking resources.
             if (_link(item, "ge_corefacilityid") or {}).get("name") == CF_NANO_NAME
         ]
         return sorted(instruments, key=lambda i: i.alias.casefold())

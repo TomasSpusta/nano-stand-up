@@ -65,9 +65,9 @@ class SubscriptionRequests:
                 CONFIRM_MAIL_GAP,
             )
             return
-        pending = self._store.request(instrument.id, instrument.guarantor.email, now)
-        link = self._confirm_url(pending.token)
-        self._mail_sender.send(_confirm_mail(instrument, link, pending.expires_at, self._from_address))
+        requested = self._store.request(instrument.id, instrument.guarantor.email, now)
+        link = self._confirm_url(requested.token)
+        self._mail_sender.send(_confirm_mail(instrument, link, requested.expires_at, self._from_address))
         log.info("Sent a confirm link for %s to %s", instrument.label, instrument.guarantor.email)
 
 

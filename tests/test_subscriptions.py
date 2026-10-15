@@ -25,9 +25,9 @@ def test_a_requested_subscription_is_not_active_before_it_is_confirmed(store: Su
 
 
 def test_confirming_makes_the_subscription_active_with_the_normalized_email(store: SubscriptionStore) -> None:
-    pending = store.request(SEM, "  Hana.Testova@Example.org ", NOW)
+    requested = store.request(SEM, "  Hana.Testova@Example.org ", NOW)
 
-    result = store.confirm(pending.token, NOW + timedelta(minutes=5))
+    result = store.confirm(requested.token, NOW + timedelta(minutes=5))
 
     assert result.outcome is ConfirmOutcome.CONFIRMED
     assert result.subscription == Subscription(SEM, EMAIL)
@@ -35,10 +35,10 @@ def test_confirming_makes_the_subscription_active_with_the_normalized_email(stor
 
 
 def test_the_confirm_link_expires_after_its_lifetime(store: SubscriptionStore) -> None:
-    pending = store.request(SEM, EMAIL, NOW)
+    requested = store.request(SEM, EMAIL, NOW)
 
-    assert pending.expires_at == NOW + CONFIRM_LINK_LIFETIME
-    result = store.confirm(pending.token, NOW + CONFIRM_LINK_LIFETIME)
+    assert requested.expires_at == NOW + CONFIRM_LINK_LIFETIME
+    result = store.confirm(requested.token, NOW + CONFIRM_LINK_LIFETIME)
 
     assert result.outcome is ConfirmOutcome.EXPIRED
     assert result.subscription is None
@@ -46,18 +46,18 @@ def test_the_confirm_link_expires_after_its_lifetime(store: SubscriptionStore) -
 
 
 def test_the_confirm_link_works_just_before_it_expires(store: SubscriptionStore) -> None:
-    pending = store.request(SEM, EMAIL, NOW)
+    requested = store.request(SEM, EMAIL, NOW)
 
-    result = store.confirm(pending.token, NOW + CONFIRM_LINK_LIFETIME - timedelta(seconds=1))
+    result = store.confirm(requested.token, NOW + CONFIRM_LINK_LIFETIME - timedelta(seconds=1))
 
     assert result.outcome is ConfirmOutcome.CONFIRMED
 
 
 def test_the_confirm_link_works_only_once(store: SubscriptionStore) -> None:
-    pending = store.request(SEM, EMAIL, NOW)
-    store.confirm(pending.token, NOW)
+    requested = store.request(SEM, EMAIL, NOW)
+    store.confirm(requested.token, NOW)
 
-    result = store.confirm(pending.token, NOW)
+    result = store.confirm(requested.token, NOW)
 
     assert result.outcome is ConfirmOutcome.USED
     assert result.subscription is None
@@ -99,12 +99,12 @@ def test_one_guarantor_subscribes_to_each_instrument_on_its_own(store: Subscript
 
 def test_the_database_keeps_only_a_hash_of_the_token(tmp_path: Path) -> None:
     path = tmp_path / "standup.sqlite3"
-    pending = SubscriptionStore(path).request(SEM, EMAIL, NOW)
+    requested = SubscriptionStore(path).request(SEM, EMAIL, NOW)
 
     with closing(sqlite3.connect(path)) as db:
         dump = "\n".join(db.iterdump())
 
-    assert pending.token not in dump
+    assert requested.token not in dump
 
 
 def test_opens_a_database_made_before_confirm_links_existed(tmp_path: Path) -> None:
@@ -121,19 +121,19 @@ def test_opens_a_database_made_before_confirm_links_existed(tmp_path: Path) -> N
         )
 
     store = SubscriptionStore(path)
-    pending = store.request(SEM, EMAIL, NOW)
-    store.confirm(pending.token, NOW)
+    requested = store.request(SEM, EMAIL, NOW)
+    store.confirm(requested.token, NOW)
 
     assert store.list_active() == [Subscription(LAB, EMAIL), Subscription(SEM, EMAIL)]
 
 
 def test_checking_a_link_does_not_use_it(store: SubscriptionStore) -> None:
-    pending = store.request(SEM, EMAIL, NOW)
+    requested = store.request(SEM, EMAIL, NOW)
 
-    assert store.check(pending.token, NOW) is ConfirmOutcome.READY
-    assert store.check(pending.token, NOW) is ConfirmOutcome.READY
+    assert store.check(requested.token, NOW) is ConfirmOutcome.READY
+    assert store.check(requested.token, NOW) is ConfirmOutcome.READY
     assert store.list_active() == []
-    assert store.confirm(pending.token, NOW).outcome is ConfirmOutcome.CONFIRMED
+    assert store.confirm(requested.token, NOW).outcome is ConfirmOutcome.CONFIRMED
 
 
 def test_checking_a_link_tells_expired_used_and_unknown(store: SubscriptionStore) -> None:
@@ -147,12 +147,12 @@ def test_checking_a_link_tells_expired_used_and_unknown(store: SubscriptionStore
 
 
 def test_a_recent_request_is_one_still_valid_and_made_since_the_given_time(store: SubscriptionStore) -> None:
-    pending = store.request(SEM, EMAIL, NOW)
+    requested = store.request(SEM, EMAIL, NOW)
 
     assert store.has_recent_request(SEM, since=NOW - timedelta(minutes=5), now=NOW + timedelta(minutes=1))
     assert not store.has_recent_request(SEM, since=NOW + timedelta(seconds=1), now=NOW + timedelta(minutes=1))
     assert not store.has_recent_request(LAB, since=NOW - timedelta(minutes=5), now=NOW)
-    store.confirm(pending.token, NOW)
+    store.confirm(requested.token, NOW)
     assert not store.has_recent_request(SEM, since=NOW - timedelta(minutes=5), now=NOW)
 
 
