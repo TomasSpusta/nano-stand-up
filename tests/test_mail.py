@@ -1,3 +1,4 @@
+import dataclasses
 import smtplib
 from email.message import EmailMessage
 from types import TracebackType
@@ -89,3 +90,21 @@ def test_logs_in_with_an_empty_password_when_none_is_set(smtp: list[FakeSmtp]) -
     [server] = smtp
     assert server.calls == ["login", "send", "quit"]
     assert server.login_args == ("standup", "")
+
+
+def test_a_message_with_an_unsubscribe_link_gets_the_one_click_unsubscribe_headers(smtp: list[FakeSmtp]) -> None:
+    link = "https://standup.example.org/unsubscribe?token=test-token"
+
+    SmtpMailSender(SmtpSettings(host="localhost", port=1025)).send(dataclasses.replace(MESSAGE, unsubscribe_link=link))
+
+    [email] = smtp[0].sent
+    assert email["List-Unsubscribe"] == f"<{link}>"
+    assert email["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
+
+
+def test_a_message_without_an_unsubscribe_link_gets_no_unsubscribe_headers(smtp: list[FakeSmtp]) -> None:
+    SmtpMailSender(SmtpSettings(host="localhost", port=1025)).send(MESSAGE)
+
+    [email] = smtp[0].sent
+    assert email["List-Unsubscribe"] is None
+    assert email["List-Unsubscribe-Post"] is None

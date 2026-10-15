@@ -152,6 +152,8 @@ def test_each_brief_has_its_own_unsubscribe_link_for_its_subscription(tmp_path: 
     sem_token = _unsubscribe_token(sem.text)
     assert sem_token != _unsubscribe_token(lab.text)
     assert f"https://standup.example.org/unsubscribe?token={sem_token}" in sem.html
+    # Mail apps show their own unsubscribe button for it.
+    assert sem.unsubscribe_link == f"https://standup.example.org/unsubscribe?token={sem_token}"
     assert store.unsubscribe(sem_token, MONDAY_8AM).subscription == Subscription(
         INSTRUMENT.id, "hana.testova@example.org"
     )

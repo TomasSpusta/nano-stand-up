@@ -14,6 +14,8 @@ class Message:
     html: str
     # The same content for mail clients that do not show HTML.
     text: str
+    # A link that ends what the message is about. Mail apps show their own unsubscribe button for it.
+    unsubscribe_link: str | None = None
 
 
 class MailSender(Protocol):
@@ -47,6 +49,10 @@ class SmtpMailSender:
         email["From"] = message.from_address
         email["To"] = message.to
         email["Subject"] = message.subject
+        if message.unsubscribe_link:
+            # RFC 8058 one-click unsubscribe: the mail app posts "List-Unsubscribe=One-Click" to the link.
+            email["List-Unsubscribe"] = f"<{message.unsubscribe_link}>"
+            email["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
         # Mail clients show the last version they can read, so HTML goes last.
         email.set_content(message.text)
         email.add_alternative(message.html, subtype="html")

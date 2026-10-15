@@ -40,6 +40,7 @@ def run_monday_job(
                 subject=brief.subject,
                 html=brief.html,
                 text=brief.text,
+                unsubscribe_link=unsubscribe_link,
             )
         )
         log.info("Sent brief for %s to %s", instrument.label, subscription.email)
