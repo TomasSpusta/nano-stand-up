@@ -5,7 +5,7 @@ The real version is `booking_api.ApiBookingSource`. The fake version here serves
 
 from typing import Protocol
 
-from nano_standup.domain import Instrument, Reservation, Week
+from nano_standup.domain import Instrument, InstrumentName, Reservation, Week
 
 
 class InstrumentNotFound(LookupError):
@@ -13,6 +13,10 @@ class InstrumentNotFound(LookupError):
 
 
 class BookingSource(Protocol):
+    def list_subscribable_instruments(self) -> list[InstrumentName]:
+        """The CF nano instruments that are in use, by alias. Booking resources that are people are left out."""
+        ...
+
     def get_instrument(self, instrument_id: str) -> Instrument:
         """The instrument with its guarantor. Raises InstrumentNotFound when there is none."""
         ...
@@ -30,6 +34,11 @@ class FakeBookingSource:
     ) -> None:
         self._instruments = {i.id: i for i in instruments}
         self._reservations = reservations or {}
+
+    def list_subscribable_instruments(self) -> list[InstrumentName]:
+        """All the fake's instruments, by alias."""
+        instruments = sorted(self._instruments.values(), key=lambda i: i.alias.casefold())
+        return [InstrumentName(i.id, i.name, i.alias) for i in instruments]
 
     def get_instrument(self, instrument_id: str) -> Instrument:
         try:

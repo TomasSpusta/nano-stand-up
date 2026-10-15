@@ -47,6 +47,15 @@ class Instrument:
         return f"{self.alias} ({self.id})"
 
 
+@dataclass(frozen=True)
+class InstrumentName:
+    """An instrument's id and names, without its guarantor. Enough to pick it from a list."""
+
+    id: str
+    name: str
+    alias: str
+
+
 class ReservationStatus(Enum):
     RESERVED = "reserved"
     # Waiting for the guarantor to approve it, so it may not happen.

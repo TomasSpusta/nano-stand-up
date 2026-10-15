@@ -11,10 +11,19 @@ from nano_standup.booking_api import (
     BookingDataError,
 )
 from nano_standup.booking_source import InstrumentNotFound
-from nano_standup.domain import Guarantor, ReservationStatus, Week
+from nano_standup.domain import Guarantor, InstrumentName, ReservationStatus, Week
 
+from fake_booking_api import (
+    OTHER_CORE_FACILITY,
+    FakeBookingApi,
+    guarantor_json,
+    instrument_json,
+    person_json,
+    recording,
+    reservation_json,
+    sem_json,
+)
 from fake_booking_api import SEM_ID as SEM
-from fake_booking_api import FakeBookingApi, guarantor_json, instrument_json, recording, reservation_json, sem_json
 
 LAB = "equip-lab"
 WEEK = Week(date(2026, 10, 19))
@@ -55,6 +64,44 @@ def test_get_instrument_refuses_an_instrument_without_a_guarantor_email(api: Fak
 
     with pytest.raises(BookingDataError, match="TEST-X"):
         ApiBookingSource(api).get_instrument("equip-x")
+
+
+def test_list_subscribable_instruments_gives_cf_nano_instruments_in_use_by_alias(api: FakeBookingApi) -> None:
+    owner = guarantor_json("Ota", "Zkusebni", "ota.zkusebni@example.org")
+    for item in (
+        person_json("Jana", "Smyslena"),
+        instrument_json("equip-old", "TEST-OLD", "Retired Test Oven", "Stara pec", owner, retired=True),
+        instrument_json("equip-other", "TEST-OTHER", "Other Lab Saw", "Pila", owner, core_facility=OTHER_CORE_FACILITY),
+        instrument_json(
+            "equip-off", "TEST-OFF", "Unbooked Test Hood", "Digestor", owner, hidden_from_planning_board=True
+        ),
+        instrument_json("equip-unset", "TEST-UNSET", "Test Pump", "Pumpa", owner, hidden_from_planning_board=None),
+    ):
+        api.instruments[item["id"]] = item
+
+    instruments = ApiBookingSource(api).list_subscribable_instruments()
+
+    assert instruments == [
+        InstrumentName(LAB, "Testovaci laborator", "TEST-LAB"),
+        InstrumentName(SEM, "Test Electron Microscope", "TEST-SEM"),
+    ]
+
+
+def test_list_subscribable_instruments_reads_every_page_of_50(api: FakeBookingApi) -> None:
+    owner = guarantor_json("Ota", "Zkusebni", "ota.zkusebni@example.org")
+    for i in range(120):
+        api.instruments[f"equip-{i}"] = instrument_json(f"equip-{i}", f"TEST-{i:03}", f"Test {i}", f"Test {i}", owner)
+
+    instruments = ApiBookingSource(api).list_subscribable_instruments()
+
+    assert len(instruments) == 122
+
+
+def test_list_subscribable_instruments_names_an_instrument_without_an_id(api: FakeBookingApi) -> None:
+    del api.instruments[SEM]["id"]
+
+    with pytest.raises(BookingDataError, match="TEST-SEM"):
+        ApiBookingSource(api).list_subscribable_instruments()
 
 
 def test_get_reservations_returns_the_instrument_week_with_user_project_and_experiment_plan(

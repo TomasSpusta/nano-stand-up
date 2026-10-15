@@ -1,10 +1,12 @@
 """An in-memory stand-in for the booking API, with the quirks the real one has. Made-up data only."""
 
+from collections.abc import Callable
 from typing import Any
 
 from nano_standup.booking_api import (
     CANCELLED_STATE,
     CANCELLED_STATUS,
+    CF_NANO_NAME,
     REQUESTED_STATE,
     REQUESTED_STATUS,
     RESERVED_STATE,
@@ -19,6 +21,16 @@ MAX_PAGE_SIZE = 50  # The real API fails with a server error on larger pages whe
 LIST_SCOPES_THAT_FAIL = {"ge_realised_for_contactid"}
 # The statecode that goes with each statuscode, as in real data.
 STATECODES = {RESERVED_STATUS: RESERVED_STATE, REQUESTED_STATUS: REQUESTED_STATE, CANCELLED_STATUS: CANCELLED_STATE}
+# The core facility record that CF nano equipment links to, as the real API gives it.
+CF_NANO = {"id": "equip-cf-nano", "name": CF_NANO_NAME, "ge_alias": CF_NANO_NAME, "ge_corefacilita": True}
+# The equipment filters the source uses, and how the fake reads each from the stored JSON.
+# A true or false field compares as 1 or 0. A null never matches, as in the real API.
+EQUIPMENT_FILTERS: dict[str, Callable[[dict[str, Any]], Any]] = {  # Any: mirrors the API's JSON.
+    "ge_vyrazen": lambda x: _as_number(x.get("ge_vyrazen")),
+    "ge_donotshowinplanningboard": lambda x: _as_number(x.get("ge_donotshowinplanningboard")),
+    "ge_corefacilityid.name": lambda x: (x.get("ge_corefacilityid") or {}).get("name"),
+}
+OTHER_CORE_FACILITY = {"id": "equip-other-cf", "name": "Other Lab", "ge_alias": "Other Lab", "ge_corefacilita": True}
 
 
 class FakeBookingApi:
@@ -30,6 +42,9 @@ class FakeBookingApi:
         self.recordings_read = 0
 
     def get(self, path: str, params: Params) -> Any:  # Any: mirrors the JSON shape of the real API.
+        if path == "/api/equipment":
+            listed = self._page(path, list(self.instruments.values()), params, set(EQUIPMENT_FILTERS))
+            return [_equipment_listed(x, params) for x in listed]
         if path.startswith("/api/equipment/"):
             item = self.instruments.get(path.removeprefix("/api/equipment/"))
             if item is None:
@@ -69,21 +84,42 @@ class FakeBookingApi:
         return matching[(page - 1) * limit : page * limit]
 
 
-def _matches(item: dict[str, Any], filters: list[str], time_fields: set[str]) -> bool:  # Any: mirrors the API's JSON.
+def _equipment_listed(item: dict[str, Any], params: Params) -> dict[str, Any]:  # Any: mirrors the API's JSON.
+    """A link holds only the id unless the scope expands it. A missing link is an empty list, not null."""
+    scopes = set(str(params.get("scope", "")).split(","))
+    listed = dict(item)
+    for link in ("ge_ownerid", "ge_corefacilityid"):
+        linked = item.get(link)
+        if not linked:
+            listed[link] = []
+        elif link not in scopes:
+            listed[link] = {"id": linked["id"]}
+    return listed
+
+
+def _matches(item: dict[str, Any], filters: list[str], fields: set[str]) -> bool:  # Any: mirrors the API's JSON.
     for f in filters:
         column, operator, value = f.split(":", 2)
-        if column not in time_fields:
+        if column not in fields:
             raise AssertionError(f"FakeBookingApi does not support filter {f!r}")
-        # A row with no value in the column never matches a lt or gt filter.
-        if item.get(column) is None:
+        reader = EQUIPMENT_FILTERS.get(column)
+        item_value = reader(item) if reader else item.get(column)
+        # A row with no value in the column never matches.
+        if item_value is None:
             return False
-        if operator == "gt" and not item[column] > value:
+        if operator == "eq" and str(item_value) != value:
             return False
-        if operator == "lt" and not item[column] < value:
+        if operator == "gt" and not item_value > value:
             return False
-        if operator not in ("gt", "lt"):
+        if operator == "lt" and not item_value < value:
+            return False
+        if operator not in ("eq", "gt", "lt"):
             raise AssertionError(f"FakeBookingApi does not support operator in {f!r}")
     return True
+
+
+def _as_number(flag: bool | None) -> int | None:
+    return None if flag is None else int(flag)
 
 
 def instrument_json(
@@ -92,8 +128,34 @@ def instrument_json(
     name_en: str | None,
     name_cz: str,
     guarantor: dict[str, Any] | None,  # Any: mirrors the API's JSON.
+    core_facility: dict[str, Any] | None = CF_NANO,  # Any: mirrors the API's JSON.
+    retired: bool = False,
+    hidden_from_planning_board: bool | None = False,
 ) -> dict[str, Any]:  # Any: mirrors the API's JSON.
-    return {"id": id, "ge_alias": alias, "ge_nameen": name_en, "name": name_cz, "ge_ownerid": guarantor}
+    return {
+        "id": id,
+        "ge_alias": alias,
+        "ge_nameen": name_en,
+        "name": name_cz,
+        "ge_ownerid": guarantor,
+        "ge_corefacilityid": core_facility,
+        "ge_vyrazen": retired,
+        "ge_donotshowinplanningboard": hidden_from_planning_board,
+    }
+
+
+def person_json(firstname: str, lastname: str) -> dict[str, Any]:  # Any: mirrors the API's JSON.
+    """A booking resource that is a person, as the real API has them: in CF nano, not retired, owned by the person,
+    with the name as alias and English name, and hidden from the planning board."""
+    name = f"{lastname} {firstname}"
+    return instrument_json(
+        f"equip-person-{lastname}",
+        name,
+        name,
+        name,
+        guarantor_json(firstname, lastname, f"{firstname}.{lastname}@example.org".lower()),
+        hidden_from_planning_board=True,
+    )
 
 
 def guarantor_json(firstname: str, lastname: str, email: str | None) -> dict[str, Any]:  # Any: mirrors the API's JSON.
