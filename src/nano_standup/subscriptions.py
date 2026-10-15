@@ -61,20 +61,12 @@ class RequestedSubscription:
     expires_at: datetime
 
 
-class ConfirmOutcome(Enum):
-    CONFIRMED = "confirmed"
-    # Only from `check`: the link is valid and not used yet.
-    READY = "ready"
+class ConfirmLinkProblem(Enum):
+    """Why a confirm link cannot be used now."""
+
     EXPIRED = "expired"
     USED = "used"
     UNKNOWN = "unknown"
-
-
-@dataclass(frozen=True)
-class ConfirmResult:
-    outcome: ConfirmOutcome
-    # The active subscription when the outcome is CONFIRMED, otherwise None.
-    subscription: Subscription | None = None
 
 
 class SubscriptionStore:
@@ -111,11 +103,10 @@ class SubscriptionStore:
             )
         return RequestedSubscription(token, expires_at)
 
-    def check(self, token: str, now: datetime) -> ConfirmOutcome:
-        """What `confirm` would do with the token now, without using it: READY, EXPIRED, USED, or UNKNOWN."""
+    def check(self, token: str, now: datetime) -> Subscription | ConfirmLinkProblem:
+        """The subscription `confirm` would make active with the token now, or why it would not. Does not use it."""
         with closing(self._connect()) as db:
-            link = _confirm_link(db, token)
-        return _refusal(link, now) or ConfirmOutcome.READY
+            return _confirm_link_subscription(db, token, now)
 
     def has_recent_request(self, instrument_id: str, since: datetime, now: datetime) -> bool:
         """True when a request for the instrument made after `since` still has a link that works."""
@@ -129,23 +120,24 @@ class SubscriptionStore:
             for created_at, expires_at in rows
         )
 
-    def confirm(self, token: str, now: datetime) -> ConfirmResult:
-        """Make the requested subscription active. Each token works once, and only before it expires."""
+    def confirm(self, token: str, now: datetime) -> Subscription | ConfirmLinkProblem:
+        """Make the requested subscription active and return it, or say why the link cannot be used.
+
+        Each token works once, and only before it expires.
+        """
         with closing(self._connect()) as db, db:
-            link = _confirm_link(db, token)
-            refusal = _refusal(link, now)
-            if refusal or link is None:
-                return ConfirmResult(refusal or ConfirmOutcome.UNKNOWN)
+            subscription = _confirm_link_subscription(db, token, now)
+            if isinstance(subscription, ConfirmLinkProblem):
+                return subscription
             # "used_at IS NULL" makes a second confirm of the same token at the same moment find nothing to update.
             updated = db.execute(
                 "UPDATE confirm_link SET used_at = ? WHERE token_hash = ? AND used_at IS NULL",
                 (now.isoformat(), _hash(token)),
             )
             if updated.rowcount == 0:
-                return ConfirmResult(ConfirmOutcome.USED)
-            subscription = Subscription(link.instrument_id, link.email)
+                return ConfirmLinkProblem.USED
             _activate(db, subscription, now)
-        return ConfirmResult(ConfirmOutcome.CONFIRMED, subscription)
+        return subscription
 
     def list_active(self) -> list[Subscription]:
         with closing(self._connect()) as db:
@@ -175,15 +167,16 @@ def _confirm_link(db: sqlite3.Connection, token: str) -> _ConfirmLink | None:
     return _ConfirmLink(instrument_id, email, datetime.fromisoformat(expires_at), used=used_at is not None)
 
 
-def _refusal(link: _ConfirmLink | None, now: datetime) -> ConfirmOutcome | None:
-    """Why the link cannot be used now, or None when it can."""
+def _confirm_link_subscription(db: sqlite3.Connection, token: str, now: datetime) -> Subscription | ConfirmLinkProblem:
+    """The subscription the token's link would make active now, or why the link cannot be used."""
+    link = _confirm_link(db, token)
     if link is None:
-        return ConfirmOutcome.UNKNOWN
+        return ConfirmLinkProblem.UNKNOWN
     if link.used:
-        return ConfirmOutcome.USED
+        return ConfirmLinkProblem.USED
     if now >= link.expires_at:
-        return ConfirmOutcome.EXPIRED
-    return None
+        return ConfirmLinkProblem.EXPIRED
+    return Subscription(link.instrument_id, link.email)
 
 
 def _activate(db: sqlite3.Connection, subscription: Subscription, now: datetime) -> None:

@@ -6,7 +6,7 @@ The routes stay thin: the work is in `SubscriptionRequests` and `SubscriptionSto
 import logging
 import sqlite3
 import urllib.parse
-from typing import Annotated
+from typing import Annotated, assert_never
 
 from fastapi import BackgroundTasks, FastAPI, Form
 from fastapi.responses import HTMLResponse
@@ -17,11 +17,12 @@ from nano_standup.domain import Clock
 from nano_standup.instrument_list import InstrumentListCache
 from nano_standup.mail import MailSender
 from nano_standup.subscription_request import SubscriptionRequests
-from nano_standup.subscriptions import ConfirmOutcome, SubscriptionStore
+from nano_standup.subscriptions import ConfirmLinkProblem, SubscriptionStore
 from nano_standup.web_pages import (
     FORM_PROBLEM,
     confirm_button_page,
-    confirm_page,
+    confirm_problem_page,
+    confirmed_page,
     form_page,
     requested_page,
     unavailable_page,
@@ -29,13 +30,16 @@ from nano_standup.web_pages import (
 
 log = logging.getLogger(__name__)
 
-CONFIRM_STATUS = {
-    ConfirmOutcome.CONFIRMED: 200,
-    ConfirmOutcome.READY: 200,
-    ConfirmOutcome.EXPIRED: 410,
-    ConfirmOutcome.USED: 410,
-    ConfirmOutcome.UNKNOWN: 404,
-}
+
+def confirm_problem_status(problem: ConfirmLinkProblem) -> int:
+    # A match, not a dict, so the type checker fails when a new problem has no status.
+    match problem:
+        case ConfirmLinkProblem.EXPIRED | ConfirmLinkProblem.USED:
+            return 410
+        case ConfirmLinkProblem.UNKNOWN:
+            return 404
+        case _:
+            assert_never(problem)
 
 
 def create_app(
@@ -95,19 +99,17 @@ def create_app(
     @app.get("/confirm", response_class=HTMLResponse)
     def show_confirm(token: str = "") -> HTMLResponse:
         """Shows the Confirm button, or at once why the link cannot be used. It never uses the token."""
-        outcome = store.check(token, clock())
-        page = confirm_button_page(token) if outcome is ConfirmOutcome.READY else confirm_page(outcome)
-        return HTMLResponse(page, status_code=CONFIRM_STATUS[outcome])
+        found = store.check(token, clock())
+        if isinstance(found, ConfirmLinkProblem):
+            return HTMLResponse(confirm_problem_page(found), status_code=confirm_problem_status(found))
+        return HTMLResponse(confirm_button_page(token))
 
     @app.post("/confirm", response_class=HTMLResponse)
     def confirm(token: Annotated[str, Form()] = "") -> HTMLResponse:
-        result = store.confirm(token, clock())
-        if result.subscription:
-            log.info(
-                "Subscription confirmed: %s gets the brief for %s",
-                result.subscription.email,
-                result.subscription.instrument_id,
-            )
-        return HTMLResponse(confirm_page(result.outcome), status_code=CONFIRM_STATUS[result.outcome])
+        confirmed = store.confirm(token, clock())
+        if isinstance(confirmed, ConfirmLinkProblem):
+            return HTMLResponse(confirm_problem_page(confirmed), status_code=confirm_problem_status(confirmed))
+        log.info("Subscription confirmed: %s gets the brief for %s", confirmed.email, confirmed.instrument_id)
+        return HTMLResponse(confirmed_page())
 
     return app

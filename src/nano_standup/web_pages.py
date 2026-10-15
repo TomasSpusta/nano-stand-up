@@ -2,9 +2,10 @@
 
 from datetime import timedelta
 from html import escape
+from typing import assert_never
 
 from nano_standup.domain import InstrumentName
-from nano_standup.subscriptions import ConfirmOutcome
+from nano_standup.subscriptions import ConfirmLinkProblem
 
 STYLE = (
     "body{margin:0;padding:0 1rem;background:#f4f4f5;color:#1a1a1a;line-height:1.5;"
@@ -17,25 +18,6 @@ STYLE = (
     ".problem{color:#b91c1c}"
 )
 FORM_PROBLEM = "Pick an instrument and enter your email."
-CONFIRM_MESSAGES = {
-    ConfirmOutcome.CONFIRMED: (
-        "Subscription confirmed",
-        "Your subscription is active. The brief for this instrument comes every Monday morning.",
-    ),
-    ConfirmOutcome.EXPIRED: (
-        "Link expired",
-        "This confirm link has expired. Subscribe again to get a new one.",
-    ),
-    ConfirmOutcome.USED: (
-        "Link already used",
-        "This confirm link was already used. If it was you, your subscription is active."
-        " To get a new link, subscribe again.",
-    ),
-    ConfirmOutcome.UNKNOWN: (
-        "Link not valid",
-        "This confirm link is not valid. Check that you opened the whole link from the email, or subscribe again.",
-    ),
-}
 
 
 def form_page(instruments: list[InstrumentName], problem: str = "") -> str:
@@ -82,10 +64,38 @@ def confirm_button_page(token: str) -> str:
     )
 
 
-def confirm_page(outcome: ConfirmOutcome) -> str:
-    """The message for an outcome of `SubscriptionStore.confirm` or `check`, other than READY."""
-    title, text = CONFIRM_MESSAGES[outcome]
+def confirmed_page() -> str:
+    return _page(
+        "Subscription confirmed",
+        "<p>Your subscription is active. The brief for this instrument comes every Monday morning.</p>",
+    )
+
+
+def confirm_problem_page(problem: ConfirmLinkProblem) -> str:
+    """Why the confirm link cannot be used."""
+    title, text = _confirm_problem_message(problem)
     return _page(title, f"<p>{escape(text)}</p>")
+
+
+def _confirm_problem_message(problem: ConfirmLinkProblem) -> tuple[str, str]:
+    # A match, not a dict, so the type checker fails when a new problem has no message.
+    match problem:
+        case ConfirmLinkProblem.EXPIRED:
+            return "Link expired", "This confirm link has expired. Subscribe again to get a new one."
+        case ConfirmLinkProblem.USED:
+            return (
+                "Link already used",
+                "This confirm link was already used. If it was you, your subscription is active."
+                " To get a new link, subscribe again.",
+            )
+        case ConfirmLinkProblem.UNKNOWN:
+            return (
+                "Link not valid",
+                "This confirm link is not valid."
+                " Check that you opened the whole link from the email, or subscribe again.",
+            )
+        case _:
+            assert_never(problem)
 
 
 def unavailable_page() -> str:

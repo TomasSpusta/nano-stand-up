@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from nano_standup.subscriptions import CONFIRM_LINK_LIFETIME, ConfirmOutcome, Subscription, SubscriptionStore
+from nano_standup.subscriptions import CONFIRM_LINK_LIFETIME, ConfirmLinkProblem, Subscription, SubscriptionStore
 
 NOW = datetime(2026, 10, 14, 10, 0, tzinfo=UTC)
 SEM = "equip-sem"
@@ -29,8 +29,7 @@ def test_confirming_makes_the_subscription_active_with_the_normalized_email(stor
 
     result = store.confirm(requested.token, NOW + timedelta(minutes=5))
 
-    assert result.outcome is ConfirmOutcome.CONFIRMED
-    assert result.subscription == Subscription(SEM, EMAIL)
+    assert result == Subscription(SEM, EMAIL)
     assert store.list_active() == [Subscription(SEM, EMAIL)]
 
 
@@ -40,8 +39,7 @@ def test_the_confirm_link_expires_after_its_lifetime(store: SubscriptionStore) -
     assert requested.expires_at == NOW + CONFIRM_LINK_LIFETIME
     result = store.confirm(requested.token, NOW + CONFIRM_LINK_LIFETIME)
 
-    assert result.outcome is ConfirmOutcome.EXPIRED
-    assert result.subscription is None
+    assert result is ConfirmLinkProblem.EXPIRED
     assert store.list_active() == []
 
 
@@ -50,7 +48,7 @@ def test_the_confirm_link_works_just_before_it_expires(store: SubscriptionStore)
 
     result = store.confirm(requested.token, NOW + CONFIRM_LINK_LIFETIME - timedelta(seconds=1))
 
-    assert result.outcome is ConfirmOutcome.CONFIRMED
+    assert result == Subscription(SEM, EMAIL)
 
 
 def test_the_confirm_link_works_only_once(store: SubscriptionStore) -> None:
@@ -59,14 +57,13 @@ def test_the_confirm_link_works_only_once(store: SubscriptionStore) -> None:
 
     result = store.confirm(requested.token, NOW)
 
-    assert result.outcome is ConfirmOutcome.USED
-    assert result.subscription is None
+    assert result is ConfirmLinkProblem.USED
 
 
 def test_an_unknown_token_is_refused(store: SubscriptionStore) -> None:
     result = store.confirm("no-such-token", NOW)
 
-    assert result.outcome is ConfirmOutcome.UNKNOWN
+    assert result is ConfirmLinkProblem.UNKNOWN
     assert store.list_active() == []
 
 
@@ -130,10 +127,10 @@ def test_opens_a_database_made_before_confirm_links_existed(tmp_path: Path) -> N
 def test_checking_a_link_does_not_use_it(store: SubscriptionStore) -> None:
     requested = store.request(SEM, EMAIL, NOW)
 
-    assert store.check(requested.token, NOW) is ConfirmOutcome.READY
-    assert store.check(requested.token, NOW) is ConfirmOutcome.READY
+    assert store.check(requested.token, NOW) == Subscription(SEM, EMAIL)
+    assert store.check(requested.token, NOW) == Subscription(SEM, EMAIL)
     assert store.list_active() == []
-    assert store.confirm(requested.token, NOW).outcome is ConfirmOutcome.CONFIRMED
+    assert store.confirm(requested.token, NOW) == Subscription(SEM, EMAIL)
 
 
 def test_checking_a_link_tells_expired_used_and_unknown(store: SubscriptionStore) -> None:
@@ -141,9 +138,9 @@ def test_checking_a_link_tells_expired_used_and_unknown(store: SubscriptionStore
     store.confirm(used.token, NOW)
     expired = store.request(LAB, EMAIL, NOW)
 
-    assert store.check(used.token, NOW) is ConfirmOutcome.USED
-    assert store.check(expired.token, NOW + CONFIRM_LINK_LIFETIME) is ConfirmOutcome.EXPIRED
-    assert store.check("no-such-token", NOW) is ConfirmOutcome.UNKNOWN
+    assert store.check(used.token, NOW) is ConfirmLinkProblem.USED
+    assert store.check(expired.token, NOW + CONFIRM_LINK_LIFETIME) is ConfirmLinkProblem.EXPIRED
+    assert store.check("no-such-token", NOW) is ConfirmLinkProblem.UNKNOWN
 
 
 def test_a_recent_request_is_one_still_valid_and_made_since_the_given_time(store: SubscriptionStore) -> None:
