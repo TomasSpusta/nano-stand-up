@@ -74,13 +74,15 @@ Read them at http://localhost:8025.
 
 The server timer starts the Monday job once, at 08:00 Prague time.
 When the booking API or the mail server fails for a brief, the job tries that brief again every 15 minutes, up to 10:00 Prague time.
+The retries keep to the quarter hours of the Prague clock (08:15, 08:30, and so on), so the last one is at 10:00 even when the job started a few seconds late.
+The 10:00 deadline is 10:00 Prague time on the day of the run, so a re-run on Tuesday at 08:00 retries until Tuesday 10:00.
 One failing instrument does not stop the briefs for the others.
-Other errors fail at once, with no retries: an instrument the booking system no longer has, booking data a brief cannot use, or an unexpected error.
+Other errors fail at once, with no retries: an instrument the booking system no longer has, an instrument the API key has no access to, booking data a brief cannot use, a recipient address the mail server refuses for good, or an unexpected error.
 Briefs that still fail at 10:00 go to the service admin in one error report, which lists the failed instruments (by alias and id when known) and their errors.
 
 Each sent brief is recorded per subscription and week.
 So running the job again by hand sends only the briefs not sent yet that week.
-A run started after 10:00 tries each brief once, with no waiting.
+A run started after 10:00 on its day tries each brief once, with no waiting.
 Only one Monday job runs at a time: it holds a lock file next to the database (`<database>.monday-job.lock`).
 A run started while another one runs sends nothing and exits with code 4.
 
