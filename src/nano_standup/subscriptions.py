@@ -9,18 +9,16 @@ from pathlib import Path
 from nano_standup.domain import normalize_email
 
 # The schema version, kept in SQLite's `user_version` of the database file.
+# `user_version` belongs to the whole file, which the record of sent briefs shares, but only this module sets it:
+# it is the schema version of the subscription table.
 # Below 2: no table yet, or the first version's table, which allows only active subscriptions.
 # 2: a subscription can end, and keeps the time it ended.
 SCHEMA_VERSION = 2
 
-
-def _table_schema(name: str) -> str:
-    """The subscription table of SCHEMA_VERSION.
-
-    An ended subscription stays as a row, so the Monday job never checks or ends it twice.
-    """
-    return f"""
-CREATE TABLE {name} (
+# The subscription table of SCHEMA_VERSION, for a new database.
+# An ended subscription stays as a row, so the Monday job never checks or ends it twice.
+_SCHEMA = """
+CREATE TABLE subscription (
     id INTEGER PRIMARY KEY,
     instrument_id TEXT NOT NULL,
     email TEXT NOT NULL,
@@ -93,7 +91,7 @@ def _create_or_upgrade_table(db: sqlite3.Connection) -> None:
         return
     table = db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'subscription'").fetchone()
     if table is None:
-        db.execute(_table_schema("subscription"))
+        db.execute(_SCHEMA)
     else:
         _upgrade_to_2(db)
     db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -103,8 +101,21 @@ def _upgrade_to_2(db: sqlite3.Connection) -> None:
     """Allow the 'ended' status and add `ended_at`.
 
     SQLite cannot change a CHECK in place, so the rows are copied into a new table that replaces the old one.
+    The statement is version 2's own, not _SCHEMA: a later version changes _SCHEMA and adds its own upgrade step.
     """
-    db.execute(_table_schema("subscription_v2"))
+    db.execute(
+        """
+CREATE TABLE subscription_v2 (
+    id INTEGER PRIMARY KEY,
+    instrument_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('active', 'ended')),
+    created_at TEXT NOT NULL,
+    ended_at TEXT,
+    UNIQUE (instrument_id, email)
+)
+"""
+    )
     db.execute(
         "INSERT INTO subscription_v2 (id, instrument_id, email, status, created_at)"
         " SELECT id, instrument_id, email, status, created_at FROM subscription"

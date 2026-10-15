@@ -7,7 +7,7 @@ from nano_standup.subscriptions import Subscription, SubscriptionStore
 
 NOW = datetime(2026, 10, 19, 6, 0, tzinfo=UTC)
 
-# The exact statement the first version (origin/main before ended subscriptions) used to create the table.
+# The exact statement the first schema version (user_version 0) used to create the table.
 _FIRST_SCHEMA = """
 CREATE TABLE IF NOT EXISTS subscription (
     id INTEGER PRIMARY KEY,
@@ -39,6 +39,8 @@ def test_a_subscription_ended_can_be_added_again(tmp_path: Path) -> None:
     store.add_active("instr-1", "Hana.Testova@example.org", NOW)
 
     assert store.list_active() == [hana]
+    # Active again, so it has no end time. The store has no public read for it, so the test reads the row.
+    assert _status_and_end_time(tmp_path / "standup.sqlite3") == [("active", None)]
 
 
 def test_a_database_from_before_ended_subscriptions_is_upgraded_and_keeps_its_subscriptions(tmp_path: Path) -> None:
@@ -76,6 +78,11 @@ def test_opening_an_up_to_date_database_needs_no_write_lock(tmp_path: Path) -> N
         other.rollback()
 
     assert store.list_active() == []
+
+
+def _status_and_end_time(database: Path) -> list[tuple[str, str | None]]:
+    with closing(sqlite3.connect(database)) as db:
+        return db.execute("SELECT status, ended_at FROM subscription ORDER BY id").fetchall()
 
 
 def _new_database(tmp_path: Path) -> Path:
