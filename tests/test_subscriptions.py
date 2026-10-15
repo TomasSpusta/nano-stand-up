@@ -125,3 +125,39 @@ def test_opens_a_database_made_before_confirm_links_existed(tmp_path: Path) -> N
     store.confirm(pending.token, NOW)
 
     assert store.list_active() == [Subscription(LAB, EMAIL), Subscription(SEM, EMAIL)]
+
+
+def test_checking_a_link_does_not_use_it(store: SubscriptionStore) -> None:
+    pending = store.request(SEM, EMAIL, NOW)
+
+    assert store.check(pending.token, NOW) is ConfirmOutcome.READY
+    assert store.check(pending.token, NOW) is ConfirmOutcome.READY
+    assert store.list_active() == []
+    assert store.confirm(pending.token, NOW).outcome is ConfirmOutcome.CONFIRMED
+
+
+def test_checking_a_link_tells_expired_used_and_unknown(store: SubscriptionStore) -> None:
+    used = store.request(SEM, EMAIL, NOW)
+    store.confirm(used.token, NOW)
+    expired = store.request(LAB, EMAIL, NOW)
+
+    assert store.check(used.token, NOW) is ConfirmOutcome.USED
+    assert store.check(expired.token, NOW + CONFIRM_LINK_LIFETIME) is ConfirmOutcome.EXPIRED
+    assert store.check("no-such-token", NOW) is ConfirmOutcome.UNKNOWN
+
+
+def test_a_recent_request_is_one_still_valid_and_made_since_the_given_time(store: SubscriptionStore) -> None:
+    pending = store.request(SEM, EMAIL, NOW)
+
+    assert store.has_recent_request(SEM, since=NOW - timedelta(minutes=5), now=NOW + timedelta(minutes=1))
+    assert not store.has_recent_request(SEM, since=NOW + timedelta(seconds=1), now=NOW + timedelta(minutes=1))
+    assert not store.has_recent_request(LAB, since=NOW - timedelta(minutes=5), now=NOW)
+    store.confirm(pending.token, NOW)
+    assert not store.has_recent_request(SEM, since=NOW - timedelta(minutes=5), now=NOW)
+
+
+def test_an_expired_request_is_not_recent(tmp_path: Path) -> None:
+    store = SubscriptionStore(tmp_path / "standup.sqlite3", confirm_link_lifetime=timedelta(minutes=1))
+    store.request(SEM, EMAIL, NOW)
+
+    assert not store.has_recent_request(SEM, since=NOW - timedelta(minutes=5), now=NOW + timedelta(minutes=2))

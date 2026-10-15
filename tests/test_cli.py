@@ -60,8 +60,8 @@ def test_an_unexpected_failure_exits_with_code_1(tmp_path: Path) -> None:
 def test_serve_runs_the_web_app_with_the_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     started: dict[str, Any] = {}  # Any: the arguments uvicorn.run got.
 
-    def fake_run(app: FastAPI, host: str, port: int) -> None:
-        started.update(app=app, host=host, port=port)
+    def fake_run(app: FastAPI, host: str, port: int, access_log: bool) -> None:
+        started.update(app=app, host=host, port=port, access_log=access_log)
 
     monkeypatch.setattr(uvicorn, "run", fake_run)
     with local_booking_server({"equip-sem": SEM}) as server:
@@ -73,6 +73,8 @@ def test_serve_runs_the_web_app_with_the_settings(tmp_path: Path, monkeypatch: p
 
     assert code == 0
     assert (started["host"], started["port"]) == ("127.0.0.1", 8081)
+    # Confirm links carry their token in the URL, so the access log would keep working tokens.
+    assert started["access_log"] is False
     assert "TEST-SEM - Test Electron Microscope" in page.text
 
 

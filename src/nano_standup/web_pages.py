@@ -70,7 +70,20 @@ def requested_page(confirm_link_lifetime: timedelta) -> str:
     return _page("Check your email", "".join(f"<p>{escape(line)}</p>" for line in lines))
 
 
+def confirm_button_page(token: str) -> str:
+    """Opening the link only shows this page. Mail scanners open links too, so only the button uses the token."""
+    return _page(
+        "Confirm your subscription",
+        "<p>Press Confirm to start getting the weekly brief for this instrument every Monday.</p>"
+        '<form method="post" action="confirm">'
+        f'<input type="hidden" name="token" value="{escape(token)}">'
+        '<button type="submit">Confirm</button>'
+        "</form>",
+    )
+
+
 def confirm_page(outcome: ConfirmOutcome) -> str:
+    """The message for an outcome of `SubscriptionStore.confirm` or `check`, other than READY."""
     title, text = CONFIRM_MESSAGES[outcome]
     return _page(title, f"<p>{escape(text)}</p>")
 

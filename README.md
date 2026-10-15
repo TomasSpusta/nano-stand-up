@@ -74,7 +74,8 @@ Read them at http://localhost:8025.
 Guarantors subscribe on a small web page.
 They pick an instrument and enter their email.
 When the email is the instrument's guarantor email in the booking system, a confirm link goes to that email.
-The subscription starts when they open the link.
+The subscription starts when they open the link and press Confirm.
+Opening the link alone does not use it, because mail scanners open links too.
 
 Set `PUBLIC_BASE_URL` in `.env` to the address the page is opened at, for example `http://localhost:8000` when testing.
 Confirm links start with it.
@@ -86,5 +87,5 @@ uv run nano-standup serve
 ```
 
 Open http://localhost:8000.
-The page loads the instrument list from the booking API, which takes a few seconds.
+The page loads the instrument list from the booking API, which takes a few seconds, and keeps it for 30 minutes.
 With Mailpit running, the confirm emails show at http://localhost:8025.

@@ -84,7 +84,8 @@ def _serve(settings: Settings) -> int:
         from_address=settings.mail_from,
         public_base_url=settings.public_base_url,
     )
-    uvicorn.run(app, host=settings.web_host, port=settings.web_port)
+    # No access log: it writes each full URL, and a confirm link's URL holds its token. The app logs what matters.
+    uvicorn.run(app, host=settings.web_host, port=settings.web_port, access_log=False)
     return 0
 
 
