@@ -42,19 +42,26 @@ class FailingBookingSource:
     """The fake booking source, but the booking API fails for some instruments until a given time."""
 
     def __init__(
-        self, source: FakeBookingSource, time: FakeTime, failing: set[str], until: datetime | None = None
+        self,
+        source: FakeBookingSource,
+        time: FakeTime,
+        failing: set[str],
+        until: datetime | None = None,
+        takes: timedelta = timedelta(),
     ) -> None:
-        """`until` None means the failure never ends."""
+        """`until` None means the failure never ends. Each failing request moves the clock on by `takes`."""
         self._source = source
         self._time = time
         self._failing = failing
         self._until = until
+        self._takes = takes
         # The times the job asked for a failing instrument, for checking the retries.
         self.failed_at: list[datetime] = []
 
     def _check(self, instrument_id: str) -> None:
         if instrument_id in self._failing and (self._until is None or self._time.now < self._until):
             self.failed_at.append(self._time.now)
+            self._time.now += self._takes
             raise BookingApiError(f"/api/equipment/{instrument_id}", 503, "Service Unavailable")
 
     def get_instrument(self, instrument_id: str) -> Instrument:
@@ -307,6 +314,33 @@ def test_a_failure_still_there_at_10_sends_one_error_report_to_the_service_admin
     assert "instr-1 to hana.testova@example.org" in visible_text(error_report.html)
     assert result.sent == 0
     assert [f.subscription.instrument_id for f in result.failed] == [INSTRUMENT.id, OTHER.id]
+
+
+def test_a_job_started_a_few_seconds_late_still_tries_at_10(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    SubscriptionStore(database).add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    start = MONDAY_8AM + timedelta(seconds=5)
+    time = FakeTime(start)
+    source = FailingBookingSource(FakeBookingSource(instruments=[INSTRUMENT]), time, failing={INSTRUMENT.id})
+
+    _run(source, database, InMemoryMailSender(), time)
+
+    # The retries keep to the 15-minute marks of the Prague clock, so the last one is at 10:00.
+    assert source.failed_at == [start] + [MONDAY_8AM + timedelta(minutes=15 * i) for i in range(1, 9)]
+
+
+def test_a_pass_longer_than_the_retry_interval_waits_for_the_next_mark_still_ahead(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    SubscriptionStore(database).add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    time = FakeTime(MONDAY_8AM)
+    # Each try takes 20 minutes, so the 08:15 mark has passed when the first try ends.
+    source = FailingBookingSource(
+        FakeBookingSource(instruments=[INSTRUMENT]), time, failing={INSTRUMENT.id}, takes=timedelta(minutes=20)
+    )
+
+    _run(source, database, InMemoryMailSender(), time)
+
+    assert source.failed_at == [MONDAY_8AM + timedelta(minutes=30 * i) for i in range(5)]
 
 
 def test_one_instrument_failing_does_not_stop_the_others(tmp_path: Path) -> None:

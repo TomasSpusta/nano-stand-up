@@ -1,7 +1,7 @@
 """Monday job: builds and sends this week's brief for every active subscription.
 
 The server timer starts it once, at 08:00 Prague time.
-A brief that fails is tried again every RETRY_INTERVAL until RETRY_DEADLINE,
+A brief that fails is tried again at each RETRY_INTERVAL mark of the Prague clock until RETRY_DEADLINE,
 unless its instrument is no longer in the booking system.
 What still fails then goes to the service admin in one error report.
 """
@@ -27,7 +27,8 @@ log = logging.getLogger(__name__)
 Sleep = Callable[[timedelta], None]
 
 RETRY_INTERVAL = timedelta(minutes=15)
-# Prague time. The last try is at this time or just before it; then the service admin gets the error report.
+# Prague time, on the day of the run. Retries keep to the RETRY_INTERVAL marks of the Prague clock (08:15, 08:30, ...),
+# so the last one is at this time. Then the service admin gets the error report.
 RETRY_DEADLINE = time(10, 0)
 
 # The failures one brief can have that a later try may not have: the booking API or the mail server is down.
@@ -121,13 +122,12 @@ class _Outcome:
 def _send_with_retries(
     sender: "_BriefSender", to_send: list[Subscription], clock: Clock, sleep: Sleep, deadline: datetime
 ) -> _Outcome:
-    """Try the briefs, then try the ones that may work later again every RETRY_INTERVAL, up to the deadline."""
+    """Try the briefs, then try the ones that may work later again at each RETRY_INTERVAL mark, up to the deadline."""
     outcome = _Outcome()
     pending = to_send
     while True:
-        pass_started = clock()
         to_retry = sender.try_each(pending, outcome)
-        next_try = pass_started + RETRY_INTERVAL
+        next_try = _next_mark(clock())
         if not to_retry or next_try > deadline:
             outcome.failed += to_retry
             return outcome
@@ -136,6 +136,20 @@ def _send_with_retries(
         )
         sleep(max(next_try - clock(), timedelta()))
         pending = [f.subscription for f in to_retry]
+
+
+def _next_mark(now: datetime) -> datetime:
+    """The first RETRY_INTERVAL mark of the Prague clock after `now`, such as 08:15 for 08:00:05 or for 08:14.
+
+    Marks, not intervals from the last try, so the last retry is at the deadline whatever second the job started,
+    and a pass longer than the interval goes on at the next mark still ahead.
+    """
+    local = now.astimezone(PRAGUE)
+    midnight = datetime.combine(local.date(), time(0, 0), tzinfo=PRAGUE)
+    # Both share the PRAGUE tzinfo, so this is wall-clock time since midnight: the marks keep to the clock on
+    # the days the clocks change.
+    marks_passed = (local - midnight) // RETRY_INTERVAL
+    return midnight + (marks_passed + 1) * RETRY_INTERVAL
 
 
 @dataclass(frozen=True)
