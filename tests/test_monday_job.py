@@ -1,5 +1,6 @@
 import logging
 import sqlite3
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -373,7 +374,8 @@ def test_the_run_logs_instruments_briefs_and_errors(tmp_path: Path, caplog: pyte
     )
     assert (
         "Monday job for the week of 19. 10. 2026: 2 instruments processed, 1 brief sent,"
-        " 0 briefs already sent before, 1 brief failed, 0 briefs sent but not recorded" in messages
+        " 0 briefs already sent before, 1 brief failed, 0 briefs sent but not recorded,"
+        " 0 subscriptions ended because the guarantor changed" in messages
     )
 
 
@@ -526,3 +528,139 @@ def test_a_brief_another_run_sent_meanwhile_is_not_sent_again(tmp_path: Path) ->
 
     assert [m.to for m in mail_sender.sent] == ["ota.zkusebni@example.org"]
     assert (result.sent, result.already_sent) == (1, 1)
+
+
+def _with_guarantor(instrument: Instrument, name: str, email: str) -> Instrument:
+    return replace(instrument, guarantor=Guarantor(name=name, email=email))
+
+
+def test_a_guarantor_email_in_another_case_and_with_spaces_still_gets_the_brief(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    SubscriptionStore(database).add_active(INSTRUMENT.id, "hana.testova@example.org", MONDAY_8AM)
+    instrument = _with_guarantor(INSTRUMENT, "Hana Testova", "  Hana.Testova@Example.ORG ")
+    mail_sender = InMemoryMailSender()
+
+    result = _run(FakeBookingSource(instruments=[instrument]), database, mail_sender)
+
+    [brief] = mail_sender.sent
+    assert (brief.to, brief.subject) == ("hana.testova@example.org", "Brief: TEST-SEM - week 19.-25. 10. 2026")
+    assert SubscriptionStore(database).list_active() == [Subscription(INSTRUMENT.id, "hana.testova@example.org")]
+    assert (result.sent, result.ended) == (1, 0)
+
+
+@pytest.mark.parametrize(
+    ("name", "email"),
+    [("Ota Zkusebni", "ota.zkusebni@example.org"), ("Hana Testova", "hana.novotna@example.org")],
+    ids=["guarantor changed", "guarantor email changed"],
+)
+def test_a_subscriber_no_longer_the_guarantor_gets_a_stop_notice_and_no_brief(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, name: str, email: str
+) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    source = FakeBookingSource(
+        instruments=[_with_guarantor(INSTRUMENT, name, email), OTHER],
+        reservations={INSTRUMENT.id: [reservation("2026-10-20T09:00", "2026-10-20T11:00", user_name="Jana Smyslena")]},
+    )
+    mail_sender = InMemoryMailSender()
+    caplog.set_level(logging.INFO, logger="nano_standup")
+
+    result = _run(source, database, mail_sender)
+
+    notice, brief = mail_sender.sent
+    assert (notice.to, notice.from_address) == ("hana.testova@example.org", "standup@example.org")
+    assert notice.subject == "Your brief for TEST-SEM has stopped"
+    for version in (notice.text, visible_text(notice.html)):
+        assert "no longer lists this email address as the guarantor of TEST-SEM" in version
+        assert "sign up again" in version
+        # The stop notice never shows the reservations or who the guarantor is now.
+        assert "Jana Smyslena" not in version
+        assert name not in version
+        assert email not in version
+    assert brief.to == "ota.zkusebni@example.org"
+    assert SubscriptionStore(database).list_active() == [Subscription(OTHER.id, "ota.zkusebni@example.org")]
+    assert (result.sent, result.ended, result.failed) == (1, 1, ())
+    assert any(
+        r.levelno == logging.WARNING
+        and r.getMessage().startswith("Subscription for TEST-SEM (instr-1) to hana.testova@example.org ended")
+        for r in caplog.records
+    )
+
+
+def test_a_re_run_in_the_same_week_sends_no_second_stop_notice(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    source = FakeBookingSource(
+        instruments=[_with_guarantor(INSTRUMENT, "Ota Zkusebni", "ota.zkusebni@example.org"), OTHER]
+    )
+    first_run = InMemoryMailSender()
+    _run(source, database, first_run)
+    re_run = InMemoryMailSender()
+
+    result = _run(source, database, re_run, FakeTime(MONDAY_8AM + timedelta(hours=3)))
+
+    assert [m.subject for m in first_run.sent if m.to == "hana.testova@example.org"] == [
+        "Your brief for TEST-SEM has stopped"
+    ]
+    assert [m.to for m in re_run.sent] == []
+    assert (result.ended, result.already_sent) == (0, 1)
+
+
+def test_a_stop_notice_that_cannot_be_sent_still_ends_the_subscription_and_is_in_the_error_report(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    time = FakeTime(MONDAY_8AM)
+    # The mail server is back at 08:20, after the stop notice failed but before the brief's second try.
+    mail_sender = FailingMailSender(time, until=MONDAY_8AM + timedelta(minutes=20))
+    source = FakeBookingSource(
+        instruments=[_with_guarantor(INSTRUMENT, "Ota Zkusebni", "ota.zkusebni@example.org"), OTHER]
+    )
+
+    result = _run(source, database, mail_sender, time)
+
+    # The stop notice is not tried again, so it is not sent at all, and no brief goes to the former subscriber.
+    brief, error_report = mail_sender.sent
+    assert brief.to == "ota.zkusebni@example.org"
+    assert error_report.to == "admin@example.org"
+    assert error_report.subject == "Nano Stand-up: 1 stop notice not sent for the week of 19. 10. 2026"
+    assert "TEST-SEM (instr-1) to hana.testova@example.org: [Errno 111] Connection refused" in error_report.text
+    assert "TEST-SEM (instr-1) to hana.testova@example.org" in visible_text(error_report.html)
+    assert SubscriptionStore(database).list_active() == [Subscription(OTHER.id, "ota.zkusebni@example.org")]
+    assert (result.sent, result.ended, result.failed) == (1, 1, ())
+    assert [f.subscription.instrument_id for f in result.stop_notices_not_sent] == [INSTRUMENT.id]
+    assert any(
+        r.levelno == logging.ERROR and "stop notice" in r.getMessage() and "hana.testova@example.org" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+class EndedByAnotherRunMeanwhile(FakeBookingSource):
+    """The fake booking source, but another run ends one subscription while this run reads its instrument."""
+
+    def __init__(self, instruments: list[Instrument], store: SubscriptionStore, ended: Subscription) -> None:
+        super().__init__(instruments)
+        self._store = store
+        self._ended = ended
+
+    def get_instrument(self, instrument_id: str) -> Instrument:
+        if instrument_id == self._ended.instrument_id:
+            self._store.end_because_guarantor_changed(self._ended, MONDAY_8AM)
+        return super().get_instrument(instrument_id)
+
+
+def test_a_subscription_another_run_ended_meanwhile_gets_no_second_stop_notice(tmp_path: Path) -> None:
+    database = tmp_path / "standup.sqlite3"
+    _subscribe_both(database)
+    source = EndedByAnotherRunMeanwhile(
+        [_with_guarantor(INSTRUMENT, "Ota Zkusebni", "ota.zkusebni@example.org"), OTHER],
+        SubscriptionStore(database),
+        Subscription(INSTRUMENT.id, "hana.testova@example.org"),
+    )
+    mail_sender = InMemoryMailSender()
+
+    result = _run(source, database, mail_sender)
+
+    assert [m.to for m in mail_sender.sent] == ["ota.zkusebni@example.org"]
+    assert (result.sent, result.ended, result.stop_notices_not_sent) == (1, 1, ())
