@@ -545,7 +545,7 @@ def test_a_guarantor_email_in_another_case_and_with_spaces_still_gets_the_brief(
     [brief] = mail_sender.sent
     assert (brief.to, brief.subject) == ("hana.testova@example.org", "Brief: TEST-SEM - week 19.-25. 10. 2026")
     assert SubscriptionStore(database).list_active() == [Subscription(INSTRUMENT.id, "hana.testova@example.org")]
-    assert (result.sent, result.ended) == (1, 0)
+    assert (result.sent, result.subscriptions_ended) == (1, 0)
 
 
 @pytest.mark.parametrize(
@@ -579,7 +579,7 @@ def test_a_subscriber_no_longer_the_guarantor_gets_a_stop_notice_and_no_brief(
         assert email not in version
     assert brief.to == "ota.zkusebni@example.org"
     assert SubscriptionStore(database).list_active() == [Subscription(OTHER.id, "ota.zkusebni@example.org")]
-    assert (result.sent, result.ended, result.failed) == (1, 1, ())
+    assert (result.sent, result.subscriptions_ended, result.failed) == (1, 1, ())
     assert any(
         r.levelno == logging.WARNING
         and r.getMessage().startswith("Subscription for TEST-SEM (instr-1) to hana.testova@example.org ended")
@@ -603,7 +603,7 @@ def test_a_re_run_in_the_same_week_sends_no_second_stop_notice(tmp_path: Path) -
         "Your brief for TEST-SEM has stopped"
     ]
     assert [m.to for m in re_run.sent] == []
-    assert (result.ended, result.already_sent) == (0, 1)
+    assert (result.subscriptions_ended, result.already_sent) == (0, 1)
 
 
 def test_a_stop_notice_that_cannot_be_sent_still_ends_the_subscription_and_is_in_the_error_report(
@@ -628,7 +628,7 @@ def test_a_stop_notice_that_cannot_be_sent_still_ends_the_subscription_and_is_in
     assert "TEST-SEM (instr-1) to hana.testova@example.org: [Errno 111] Connection refused" in error_report.text
     assert "TEST-SEM (instr-1) to hana.testova@example.org" in visible_text(error_report.html)
     assert SubscriptionStore(database).list_active() == [Subscription(OTHER.id, "ota.zkusebni@example.org")]
-    assert (result.sent, result.ended, result.failed) == (1, 1, ())
+    assert (result.sent, result.subscriptions_ended, result.failed) == (1, 1, ())
     assert [f.subscription.instrument_id for f in result.stop_notices_not_sent] == [INSTRUMENT.id]
     assert any(
         r.levelno == logging.ERROR and "stop notice" in r.getMessage() and "hana.testova@example.org" in r.getMessage()
@@ -667,7 +667,7 @@ def test_a_subscription_another_run_ended_meanwhile_gets_no_second_stop_notice(
 
     assert [m.to for m in mail_sender.sent] == ["ota.zkusebni@example.org"]
     # This run did not end it, so it does not count it as ended.
-    assert (result.sent, result.ended, result.stop_notices_not_sent) == (1, 0, ())
+    assert (result.sent, result.subscriptions_ended, result.stop_notices_not_sent) == (1, 0, ())
     assert any(
         "1 brief sent," in r.getMessage() and "0 subscriptions ended because the guarantor changed" in r.getMessage()
         for r in caplog.records
@@ -705,4 +705,4 @@ def test_an_unexpected_error_sending_a_stop_notice_does_not_stop_the_run(tmp_pat
         in error_report.text
     )
     assert SubscriptionStore(database).list_active() == [Subscription(OTHER.id, "ota.zkusebni@example.org")]
-    assert (result.sent, result.ended, result.failed) == (1, 1, ())
+    assert (result.sent, result.subscriptions_ended, result.failed) == (1, 1, ())

@@ -67,7 +67,7 @@ class MondayJobResult:
     # Briefs sent, but the record of sent briefs could not save them, so a re-run sends them again.
     not_recorded: tuple[SendFailure, ...]
     # Subscriptions ended because the subscriber is no longer the instrument's guarantor.
-    ended: int
+    subscriptions_ended: int
     # Stop notices about an ended subscription that could not be sent. The subscription ended anyway.
     stop_notices_not_sent: tuple[SendFailure, ...]
 
@@ -105,9 +105,6 @@ def run_monday_job(
     to_send = [s for s in active if not sent_briefs.was_sent(s, week)]
 
     outcome = _send_with_retries(step, to_send, clock, sleep, deadline)
-    sent = (
-        len(to_send) - len(outcome.failed) - outcome.sent_by_another_run - outcome.ended - outcome.ended_by_another_run
-    )
     already_sent = len(active) - len(to_send) + outcome.sent_by_another_run
     if outcome.failed or outcome.not_recorded or outcome.stop_notices_not_sent:
         _send_error_report(mail_sender, from_address, service_admin_email, week, outcome)
@@ -116,34 +113,34 @@ def run_monday_job(
         " %s sent but not recorded, %s ended because the guarantor changed",
         _date(week),
         _count(len({s.instrument_id for s in to_send}), "instrument"),
-        _count(sent, "brief"),
+        _count(outcome.sent, "brief"),
         _count(already_sent, "brief"),
         _count(len(outcome.failed), "brief"),
         _count(len(outcome.not_recorded), "brief"),
-        _count(outcome.ended, "subscription"),
+        _count(outcome.subscriptions_ended, "subscription"),
     )
     return MondayJobResult(
-        sent=sent,
+        sent=outcome.sent,
         already_sent=already_sent,
         failed=tuple(outcome.failed),
         not_recorded=tuple(outcome.not_recorded),
-        ended=outcome.ended,
+        subscriptions_ended=outcome.subscriptions_ended,
         stop_notices_not_sent=tuple(outcome.stop_notices_not_sent),
     )
 
 
 @dataclass
 class _Outcome:
-    """What did not go as planned in one or more passes over the briefs."""
+    """What happened in one or more passes over the briefs."""
 
+    # Briefs this run sent, recorded or not.
+    sent: int = 0
     failed: list[SendFailure] = field(default_factory=list)
     not_recorded: list[SendFailure] = field(default_factory=list)
     # Briefs another run sent after this run started, so this run did not send them.
     sent_by_another_run: int = 0
     # Subscriptions this run ended because the subscriber is no longer the guarantor, so no brief went out.
-    ended: int = 0
-    # Subscriptions another run ended after this run started, so this run sent no brief and no stop notice.
-    ended_by_another_run: int = 0
+    subscriptions_ended: int = 0
     stop_notices_not_sent: list[SendFailure] = field(default_factory=list)
 
 
@@ -196,7 +193,9 @@ class _SubscriptionStep:
                 instrument_name = instrument.label
                 if not is_still_guarantor(subscription, instrument):
                     self.end(subscription, instrument, outcome)
-                elif not self.send(subscription, instrument):
+                elif self.send(subscription, instrument):
+                    outcome.sent += 1
+                else:
                     outcome.sent_by_another_run += 1
             except PERMANENT_ERRORS as error:
                 failure = SendFailure(subscription, instrument_name, str(error))
@@ -207,6 +206,7 @@ class _SubscriptionStep:
                 log.error("Brief for %s failed: %s", failure.describe(), error)
                 to_retry.append(failure)
             except _NotRecorded as error:
+                outcome.sent += 1
                 outcome.not_recorded.append(SendFailure(subscription, instrument_name, str(error.__cause__)))
             # Catch-all: "Catch what you expect" allows one where it keeps the service running. Here it keeps
             # an unexpected error, such as a bug on odd data, from stopping the other briefs and the error report.
@@ -228,9 +228,8 @@ class _SubscriptionStep:
             log.info(
                 "Subscription for %s to %s was ended by another run meanwhile", instrument.label, subscription.email
             )
-            outcome.ended_by_another_run += 1
             return
-        outcome.ended += 1
+        outcome.subscriptions_ended += 1
         log.warning(
             "Subscription for %s to %s ended: the booking system no longer lists this email as the guarantor",
             instrument.label,
@@ -298,8 +297,8 @@ class _ReportSection:
 
     failures: list[SendFailure]
     # What failed, such as "brief", and what went wrong, such as "not sent", for the subject.
-    noun: str
-    label: str
+    kind: str
+    problem: str
     # The sentence before the list of failures.
     intro: str
 
@@ -333,7 +332,7 @@ def _send_error_report(mail_sender: MailSender, from_address: str, to: str, week
         if not section.failures:
             continue
         lines = [f"{f.describe()}: {f.error}" for f in section.failures]
-        subject_parts.append(f"{_count(len(section.failures), section.noun)} {section.label}")
+        subject_parts.append(f"{_count(len(section.failures), section.kind)} {section.problem}")
         text_parts.append("\n".join([section.intro, "", *(f"- {line}" for line in lines)]) + "\n")
         html_parts.append(
             f"<p>{escape(section.intro)}</p><ul>{''.join(f'<li>{escape(line)}</li>' for line in lines)}</ul>"
