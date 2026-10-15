@@ -1,16 +1,25 @@
 """What a brief shows, worked out once from an instrument's week. The HTML and plain-text versions both draw it."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
-from nano_standup.domain import PRAGUE, Instrument, Reservation, ReservationStatus, Week, day_name
+from nano_standup.domain import (
+    PRAGUE,
+    WEEKEND,
+    Instrument,
+    Reservation,
+    ReservationStatus,
+    Week,
+    WorkingHours,
+    day_name,
+)
+from nano_standup.heads_ups import heads_up_rules
 
 NO_EXPERIMENT_PLAN = "No experiment plan given"
 NO_RESERVATIONS_THIS_WEEK = "No reservations this week."
 NO_RESERVATIONS_THIS_DAY = "No reservations"
 FOOTER_REMINDER = "Check the booking system for later changes."
-# Saturday and Sunday, as date.weekday() gives them.
-WEEKEND = {5, 6}
 MARKS = {
     ReservationStatus.CANCELLED: "Cancelled",
     ReservationStatus.REQUESTED: "Requested: needs your approval",
@@ -32,16 +41,30 @@ class LabelledNote:
 
 
 @dataclass(frozen=True)
-class Row:
-    """One reservation as the brief shows it. Empty strings are left out."""
+class TimeSpan:
+    """When a reservation runs, as seen from the day it shows on."""
 
-    status: ReservationStatus
     # The start time, with the start day when the reservation runs in from the previous week: "Sun 22:00".
     start: str
     # The end time, with the end day when it is on a later day: "Tue 13:00".
     end: str
     # Shown on Monday, though it started in the previous week.
     runs_in: bool
+
+    def text(self, keep_together: Callable[[str], str] = lambda part: part) -> str:
+        """"15:00 to Tue 13:00", or "from Sun 22:00 to 06:00" when the reservation runs in from the previous week.
+
+        `keep_together` wraps the start and the end, so the HTML version can keep each day and time on one line.
+        """
+        return f"{'from ' if self.runs_in else ''}{keep_together(self.start)} to {keep_together(self.end)}"
+
+
+@dataclass(frozen=True)
+class Row:
+    """One reservation as the brief shows it. Empty strings are left out."""
+
+    status: ReservationStatus
+    span: TimeSpan
     length: str
     user_name: str
     project_code: str
@@ -59,12 +82,22 @@ class Row:
         return [LabelledNote("Note", self.note), LabelledNote("Private note", self.private_note)]
 
 
-def time_span(start: str, end: str, runs_in: bool) -> str:
-    """"15:00 to Tue 13:00", or "from Sun 22:00 to 06:00" when the reservation runs in from the previous week.
+@dataclass(frozen=True)
+class HeadsUpItem:
+    """One matching reservation: the day it shows on, its time, and its user, as in its row."""
 
-    Takes the parts, so the HTML version can keep each day and time together.
-    """
-    return f"{'from ' if runs_in else ''}{start} to {end}"
+    # "Tue 20. 10."
+    day: str
+    span: TimeSpan
+    user_name: str
+
+
+@dataclass(frozen=True)
+class HeadsUp:
+    """One heads-up rule that matched, with its reservations."""
+
+    title: str
+    items: list[HeadsUpItem]
 
 
 @dataclass(frozen=True)
@@ -85,6 +118,8 @@ class BriefContent:
     week_line: str
     # Empty for a week without reservations: it gets a short brief with no counts and no days.
     counts: list[Count]
+    # Empty when no rule matches: the brief then leaves out the Heads-up section.
+    heads_ups: list[HeadsUp]
     days: list[Day]
     built: str
 
@@ -94,7 +129,11 @@ class BriefContent:
 
 
 def brief_content(
-    instrument: Instrument, week: Week, reservations: list[Reservation], built_at: datetime
+    instrument: Instrument,
+    week: Week,
+    reservations: list[Reservation],
+    built_at: datetime,
+    working_hours: WorkingHours,
 ) -> BriefContent:
     """`built_at` must carry a time zone; the footer shows it in Prague time."""
     if built_at.tzinfo is None:
@@ -107,6 +146,7 @@ def brief_content(
         instrument_name=instrument.name,
         week_line=f"{instrument.alias} - Monday {_day_month(week.monday)} to Sunday {_day_month(week.sunday)} {week.sunday.year}",
         counts=_counts(week, reservations) if reservations else [],
+        heads_ups=_heads_ups(week, reservations, working_hours),
         days=_days(week, reservations) if reservations else [],
         built=f"Built on {day_name(built_local.date())} {_day_month(built_local.date())} {built_local.year} at {built_local:%H:%M}.",
     )
@@ -117,13 +157,13 @@ def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
 
     Hours count only inside the week, for a reservation that runs in from the previous week or past Sunday.
     """
-    active = [r for r in reservations if r.status is not ReservationStatus.CANCELLED]
+    active = [r for r in reservations if r.will_happen]
     cancelled = len(reservations) - len(active)
     requested = sum(1 for r in active if r.status is ReservationStatus.REQUESTED)
     hours = sum(week.time_inside(r).total_seconds() for r in active) / 3600
     # Reservations with no user id still count each user name once.
     users = len({r.user_id or r.user_name for r in active})
-    without_experiment_plan = sum(1 for r in active if not r.experiment_plan.strip())
+    without_experiment_plan = sum(1 for r in reservations if r.will_happen_without_experiment_plan)
     # Shown only when there is something to approve, and first, because it asks the guarantor to act.
     waiting = [Count(str(requested), "waiting for your approval", needs_action=True)] if requested else []
     return waiting + [
@@ -135,14 +175,30 @@ def _counts(week: Week, reservations: list[Reservation]) -> list[Count]:
     ]
 
 
-def _days(week: Week, reservations: list[Reservation]) -> list[Day]:
-    """Every weekday, empty or not. Weekend days only when they have reservations.
+def _heads_ups(week: Week, reservations: list[Reservation], working_hours: WorkingHours) -> list[HeadsUp]:
+    """The rules that match, in a fixed order, each with its reservations in the order given."""
+    heads_ups = [
+        HeadsUp(rule.title, [_heads_up_item(r, week) for r in reservations if rule.matches(r)])
+        for rule in heads_up_rules(working_hours)
+    ]
+    return [heads_up for heads_up in heads_ups if heads_up.items]
 
-    A reservation shows on its start day, or on Monday when it runs in from the previous week.
-    """
+
+def _heads_up_item(reservation: Reservation, week: Week) -> HeadsUpItem:
+    day = _shown_on(reservation, week)
+    return HeadsUpItem(f"{_short_day_name(day)} {_day_month(day)}", _span(reservation, day), reservation.user_name)
+
+
+def _shown_on(reservation: Reservation, week: Week) -> date:
+    """Its start day, or Monday when it runs in from the previous week."""
+    return max(reservation.start.date(), week.monday)
+
+
+def _days(week: Week, reservations: list[Reservation]) -> list[Day]:
+    """Every weekday, empty or not. Weekend days only when they have reservations."""
     days = []
     for day in week.days():
-        rows = [_row(r, day) for r in reservations if max(r.start.date(), week.monday) == day]
+        rows = [_row(r, day) for r in reservations if _shown_on(r, week) == day]
         if rows or day.weekday() not in WEEKEND:
             days.append(Day(day, rows))
     return days
@@ -153,15 +209,22 @@ def _row(reservation: Reservation, day: date) -> Row:
     note = reservation.note.strip()
     return Row(
         status=reservation.status,
-        start=_time_seen_from(reservation.start, day),
-        end=_time_seen_from(reservation.end, day),
-        runs_in=reservation.start.date() < day,
+        span=_span(reservation, day),
         length=_length(reservation),
         user_name=reservation.user_name,
         project_code=reservation.project_code,
         experiment_plan=reservation.experiment_plan.strip(),
         note=note if _adds_to(note, reservation.experiment_plan) else "",
         private_note=reservation.private_note.strip(),
+    )
+
+
+def _span(reservation: Reservation, day: date) -> TimeSpan:
+    """`day` is the day the reservation shows on."""
+    return TimeSpan(
+        start=_time_seen_from(reservation.start, day),
+        end=_time_seen_from(reservation.end, day),
+        runs_in=reservation.start.date() < day,
     )
 
 

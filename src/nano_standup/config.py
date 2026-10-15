@@ -2,9 +2,15 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, time
 from pathlib import Path
 
+from nano_standup.domain import WorkingHours
 from nano_standup.mail import SmtpSettings
+
+# Used when the settings leave out WORKING_DAY_START or WORKING_DAY_END.
+DEFAULT_WORKING_DAY_START = "07:00"
+DEFAULT_WORKING_DAY_END = "19:00"
 
 
 class ConfigError(ValueError):
@@ -18,6 +24,8 @@ class Settings:
     smtp: SmtpSettings
     mail_from: str
     database_path: Path
+    # The Heads-up section points out reservations outside these hours.
+    working_hours: WorkingHours
 
 
 def load_settings(path: Path, environ: Mapping[str, str]) -> Settings:
@@ -38,6 +46,22 @@ def load_settings(path: Path, environ: Mapping[str, str]) -> Settings:
         port = int(port_text)
     except ValueError:
         raise ConfigError(f"Setting SMTP_PORT must be a number, got {port_text!r}") from None
+
+    def clock_time(key: str, default: str) -> time:
+        text = optional(key) or default
+        try:
+            return datetime.strptime(text, "%H:%M").time()
+        except ValueError:
+            raise ConfigError(f"Setting {key} must be a time such as {default}, got {text!r}") from None
+
+    # Read before the try: ConfigError is a ValueError too.
+    working_day_start = clock_time("WORKING_DAY_START", DEFAULT_WORKING_DAY_START)
+    working_day_end = clock_time("WORKING_DAY_END", DEFAULT_WORKING_DAY_END)
+    try:
+        working_hours = WorkingHours(working_day_start, working_day_end)
+    except ValueError as error:
+        raise ConfigError(f"Settings WORKING_DAY_START and WORKING_DAY_END: {error}") from None
+
     starttls_text = (optional("SMTP_STARTTLS") or "false").lower()
     if starttls_text not in ("true", "false"):
         raise ConfigError(f"Setting SMTP_STARTTLS must be true or false, got {starttls_text!r}")
@@ -54,6 +78,7 @@ def load_settings(path: Path, environ: Mapping[str, str]) -> Settings:
         ),
         mail_from=required("MAIL_FROM"),
         database_path=path.parent / required("DATABASE_PATH"),
+        working_hours=working_hours,
     )
 
 

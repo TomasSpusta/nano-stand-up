@@ -14,6 +14,9 @@ uv sync
 Copy `.env.example` to `.env` and fill it in.
 `.env` holds the API key and is git-ignored: never commit it.
 
+`WORKING_DAY_START` and `WORKING_DAY_END` (default 07:00 and 19:00) set the working day, Monday to Friday.
+The Heads-up section of the brief lists the reservations outside it.
+
 ## Test
 
 ```bash

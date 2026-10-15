@@ -15,9 +15,10 @@ from nano_standup.brief_content import (
     BriefContent,
     Count,
     Day,
+    HeadsUp,
+    HeadsUpItem,
     LabelledNote,
     Row,
-    time_span,
 )
 from nano_standup.domain import ReservationStatus
 
@@ -52,6 +53,7 @@ def brief_html(content: BriefContent) -> str:
         body = _counts_html(content.counts) + "".join(_day_html(day) for day in content.days)
     else:
         body = f'<p style="margin:16px 0 8px;">{NO_RESERVATIONS_THIS_WEEK}</p>'
+    body = _heads_ups_html(content.heads_ups) + body
 
     # Outlook ignores max-width, so it gets a fixed-width table instead.
     return f"""<!doctype html>
@@ -92,6 +94,26 @@ def _count_html(count: Count) -> str:
     )
 
 
+def _heads_ups_html(heads_ups: list[HeadsUp]) -> str:
+    """The Heads-up section, or nothing when no rule matches."""
+    if not heads_ups:
+        return ""
+    sections = "".join(
+        f'<div style="margin-top:8px;"><strong>{html.escape(heads_up.title)}</strong>'
+        f'<ul style="margin:2px 0 0;padding-left:20px;">{"".join(_heads_up_item_html(item) for item in heads_up.items)}</ul></div>'
+        for heads_up in heads_ups
+    )
+    return (
+        f'<div style="background:{AMBER_BACKGROUND};border-left:3px solid {AMBER_TEXT};border-radius:6px;padding:10px 12px;margin:16px 0 0;font-size:14px;">'
+        f'<div style="font-weight:700;color:{AMBER_TEXT};">Heads-up</div>{sections}</div>'
+    )
+
+
+def _heads_up_item_html(item: HeadsUpItem) -> str:
+    # A narrow screen may break the line between the day, the time span, and the user, never inside "Tue 20. 10.".
+    return f"<li>{_unbroken(item.day)} {item.span.text(_unbroken)}, {_html_text(item.user_name)}</li>"
+
+
 def _day_html(day: Day) -> str:
     rows = "".join(_row_html(row) for row in day.rows) or (
         f'<tr><td style="padding:8px 0;color:{FADED_TEXT};">{NO_RESERVATIONS_THIS_DAY}</td></tr>'
@@ -116,7 +138,7 @@ def _row_html(row: Row) -> str:
         else ("", "")
     )
     # A narrow column may break the time span only around "from" and "to", never inside "Wed 13:00".
-    span = time_span(row.start.replace(" ", "&nbsp;"), row.end.replace(" ", "&nbsp;"), row.runs_in)
+    span = row.span.text(_unbroken)
     mark = (
         f'<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:{style.mark_color};">{row.mark}</div>'
         if row.mark
@@ -153,6 +175,11 @@ def _note_html(note: LabelledNote) -> str:
     if not note.text:
         return ""
     return f'<div style="margin-top:4px;color:{NOTE_TEXT};font-size:13px;"><strong>{note.label}:</strong> {_html_text(note.text)}</div>'
+
+
+def _unbroken(text: str) -> str:
+    """Text the brief makes, such as "Wed 13:00", kept on one line."""
+    return text.replace(" ", "&nbsp;")
 
 
 def _html_text(text: str) -> str:

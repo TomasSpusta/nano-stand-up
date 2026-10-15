@@ -14,7 +14,7 @@ import pytest
 from nano_standup.brief import Brief, build_brief
 from nano_standup.domain import Reservation, ReservationStatus, Week
 
-from helpers import INSTRUMENT, reservation
+from helpers import INSTRUMENT, WORKING_HOURS, reservation
 
 GOLDEN = Path(__file__).parent / "golden"
 WEEK = Week(date(2026, 10, 19))
@@ -45,7 +45,7 @@ FULL_WEEK = [
 
 
 def _brief(reservations: list[Reservation]) -> Brief:
-    return build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT)
+    return build_brief(INSTRUMENT, WEEK, reservations, BUILT_AT, WORKING_HOURS)
 
 
 def _golden_path(name: str) -> Path:

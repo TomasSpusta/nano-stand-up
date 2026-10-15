@@ -1,8 +1,10 @@
+from datetime import time
 from pathlib import Path
 
 import pytest
 
 from nano_standup.config import ConfigError, load_settings
+from nano_standup.domain import WorkingHours
 from nano_standup.mail import SmtpSettings
 
 FULL = """
@@ -30,6 +32,8 @@ def test_reads_all_settings_from_the_file(tmp_path: Path) -> None:
     assert settings.smtp == SmtpSettings(host="localhost", port=1025, username=None, password=None, starttls=False)
     assert settings.mail_from == "standup@example.org"
     assert settings.database_path == tmp_path / "data/standup.sqlite3"
+    # Left out of the file, so the defaults.
+    assert settings.working_hours == WorkingHours(time(7, 0), time(19, 0))
 
 
 def test_optional_smtp_login_and_starttls(tmp_path: Path) -> None:
@@ -73,3 +77,24 @@ def test_a_line_without_an_equals_sign_is_named(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match=r"\.env: line 2 has no '='"):
         load_settings(path, environ={})
+
+
+def test_working_hours_can_be_set(tmp_path: Path) -> None:
+    text = FULL + "WORKING_DAY_START=08:00\nWORKING_DAY_END=17:30\n"
+
+    settings = load_settings(write(tmp_path, text), environ={})
+
+    assert settings.working_hours == WorkingHours(time(8, 0), time(17, 30))
+
+
+@pytest.mark.parametrize("value", ["7", "7:00:00", "25:00", "seven"])
+def test_a_bad_working_day_time_is_named(tmp_path: Path, value: str) -> None:
+    with pytest.raises(ConfigError, match=f"WORKING_DAY_END must be a time such as 19:00, got '{value}'"):
+        load_settings(write(tmp_path, FULL + f"WORKING_DAY_END={value}\n"), environ={})
+
+
+def test_a_working_day_that_ends_before_it_starts_is_named(tmp_path: Path) -> None:
+    text = FULL + "WORKING_DAY_START=19:00\nWORKING_DAY_END=07:00\n"
+
+    with pytest.raises(ConfigError, match="WORKING_DAY_START and WORKING_DAY_END: Working day must start before it ends"):
+        load_settings(write(tmp_path, text), environ={})
