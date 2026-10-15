@@ -1,7 +1,10 @@
 """Monday job: builds and sends this week's brief for every active subscription.
 
+Before each brief it checks that the subscriber is still the instrument's guarantor.
+If not, the subscription ends and the subscriber gets a short stop notice instead of the brief.
+
 The server timer starts it once, at 08:00 Prague time.
-A brief that fails is tried again at each RETRY_INTERVAL mark of the Prague clock until RETRY_DEADLINE,
+A brief or stop notice that fails is tried again at each RETRY_INTERVAL mark of the Prague clock until RETRY_DEADLINE,
 unless a later try cannot fix the error.
 What still fails then goes to the service admin in one error report (see `error_report`).
 """
@@ -18,6 +21,7 @@ from nano_standup.brief import build_brief
 from nano_standup.domain import PRAGUE, Clock, Instrument, Reservation, UserFacts, Week
 from nano_standup.error_report import SendFailure, send_error_report
 from nano_standup.formatting import counted, day_month_year
+from nano_standup.guarantor_change import is_still_guarantor, stop_notice
 from nano_standup.heads_ups import HeadsUpSettings
 from nano_standup.mail import MailSender, Message, RecipientRefused
 from nano_standup.sent_briefs import SentBriefStore
@@ -52,6 +56,10 @@ class MondayJobResult:
     failed: tuple[SendFailure, ...]
     # Briefs sent, but the record of sent briefs could not save them, so a re-run sends them again.
     not_recorded: tuple[SendFailure, ...]
+    # Subscriptions ended because the subscriber is no longer the instrument's guarantor.
+    subscriptions_ended: int
+    # Stop notices about an ended subscription that could not be sent. The subscription ended anyway.
+    stop_notices_not_sent: tuple[SendFailure, ...]
 
 
 def run_monday_job(
@@ -73,14 +81,22 @@ def run_monday_job(
     started = clock().astimezone(PRAGUE)
     week = Week.containing(started.date())
     deadline = datetime.combine(started.date(), RETRY_DEADLINE, tzinfo=PRAGUE)
-    sender = _BriefSender(source, sent_briefs, mail_sender, clock, from_address, heads_up_settings, week)
+    step = _SubscriptionStep(
+        source=source,
+        subscriptions=subscriptions,
+        sent_briefs=sent_briefs,
+        mail_sender=mail_sender,
+        clock=clock,
+        from_address=from_address,
+        heads_up_settings=heads_up_settings,
+        week=week,
+    )
     active = subscriptions.list_active()
     to_send = [s for s in active if not sent_briefs.was_sent(s, week)]
 
-    outcome = _send_with_retries(sender, to_send, clock, sleep, deadline)
-    sent = len(to_send) - len(outcome.failed) - outcome.sent_by_another_run
+    outcome = _send_with_retries(step, to_send, clock, sleep, deadline)
     already_sent = len(active) - len(to_send) + outcome.sent_by_another_run
-    if outcome.failed or outcome.not_recorded:
+    if outcome.failed or outcome.not_recorded or outcome.stop_notices_not_sent:
         send_error_report(
             mail_sender,
             from_address,
@@ -88,52 +104,42 @@ def run_monday_job(
             week,
             failed=outcome.failed,
             not_recorded=outcome.not_recorded,
+            stop_notices_not_sent=outcome.stop_notices_not_sent,
         )
     log.info(
         "Monday job for the week of %s: %s processed, %s sent, %s already sent before, %s failed,"
-        " %s sent but not recorded",
+        " %s sent but not recorded, %s ended because the guarantor changed",
         day_month_year(week.monday),
         counted(len({s.instrument_id for s in to_send}), "instrument"),
-        counted(sent, "brief"),
+        counted(outcome.sent, "brief"),
         counted(already_sent, "brief"),
         counted(len(outcome.failed), "brief"),
         counted(len(outcome.not_recorded), "brief"),
+        counted(outcome.subscriptions_ended, "subscription"),
     )
     return MondayJobResult(
-        sent=sent,
+        sent=outcome.sent,
         already_sent=already_sent,
         failed=tuple(outcome.failed),
         not_recorded=tuple(outcome.not_recorded),
+        subscriptions_ended=outcome.subscriptions_ended,
+        stop_notices_not_sent=tuple(outcome.stop_notices_not_sent),
     )
 
 
 @dataclass
 class _Outcome:
-    """What did not go as planned in one or more passes over the briefs."""
+    """What happened in one or more passes over the briefs."""
 
+    # Briefs this run sent, recorded or not.
+    sent: int = 0
     failed: list[SendFailure] = field(default_factory=list)
     not_recorded: list[SendFailure] = field(default_factory=list)
     # Briefs another run sent after this run started, so this run did not send them.
     sent_by_another_run: int = 0
-
-
-def _send_with_retries(
-    sender: "_BriefSender", to_send: list[Subscription], clock: Clock, sleep: Sleep, deadline: datetime
-) -> _Outcome:
-    """Try the briefs, then try the ones that may work later again at each RETRY_INTERVAL mark, up to the deadline."""
-    outcome = _Outcome()
-    pending = to_send
-    while True:
-        to_retry = sender.try_each(pending, outcome)
-        next_try = _next_mark(clock())
-        if not to_retry or next_try > deadline:
-            outcome.failed += to_retry
-            return outcome
-        log.warning(
-            "%s failed, trying again at %s", counted(len(to_retry), "brief"), f"{next_try.astimezone(PRAGUE):%H:%M}"
-        )
-        sleep(max(next_try - clock(), timedelta()))
-        pending = [f.subscription for f in to_retry]
+    # Subscriptions this run ended because the subscriber is no longer the guarantor, so no brief went out.
+    subscriptions_ended: int = 0
+    stop_notices_not_sent: list[SendFailure] = field(default_factory=list)
 
 
 def _next_mark(now: datetime) -> datetime:
@@ -151,10 +157,77 @@ def _next_mark(now: datetime) -> datetime:
 
 
 @dataclass(frozen=True)
-class _BriefSender:
-    """Builds, sends, and records the brief of one subscription for the week."""
+class _StopNotice:
+    """The stop notice for a subscription this run ended."""
+
+    subscription: Subscription
+    # The instrument's alias and id.
+    instrument_name: str
+    message: Message
+
+    def failure(self, error: str) -> SendFailure:
+        return SendFailure(self.subscription, self.instrument_name, error)
+
+    def describe(self) -> str:
+        return f"{self.instrument_name} to {self.subscription.email}"
+
+
+@dataclass(frozen=True)
+class _FailedStopNotice:
+    notice: _StopNotice
+    # The error message of the last try.
+    error: str
+
+
+@dataclass
+class _ToRetry:
+    """What failed in one pass but may work in a later one."""
+
+    briefs: list[SendFailure] = field(default_factory=list)
+    # Sent again as they are: the subscription has already ended, so a retry never ends it or checks it again.
+    stop_notices: list[_FailedStopNotice] = field(default_factory=list)
+
+
+def _send_with_retries(
+    step: "_SubscriptionStep", to_send: list[Subscription], clock: Clock, sleep: Sleep, deadline: datetime
+) -> _Outcome:
+    """Try the briefs, then try the ones that may work later again at each RETRY_INTERVAL mark, up to the deadline.
+
+    Stop notices that fail are tried again in the same passes.
+    """
+    outcome = _Outcome()
+    briefs = to_send
+    stop_notices: list[_StopNotice] = []
+    while True:
+        to_retry = _ToRetry()
+        step.try_each(briefs, outcome, to_retry)
+        for notice in stop_notices:
+            step.try_stop_notice(notice, outcome, to_retry)
+        next_try = _next_mark(clock())
+        if not (to_retry.briefs or to_retry.stop_notices) or next_try > deadline:
+            outcome.failed += to_retry.briefs
+            outcome.stop_notices_not_sent += [f.notice.failure(f.error) for f in to_retry.stop_notices]
+            return outcome
+        failed = [
+            counted(number, noun)
+            for number, noun in ((len(to_retry.briefs), "brief"), (len(to_retry.stop_notices), "stop notice"))
+            if number
+        ]
+        log.warning("%s failed, trying again at %s", " and ".join(failed), f"{next_try.astimezone(PRAGUE):%H:%M}")
+        sleep(max(next_try - clock(), timedelta()))
+        briefs = [f.subscription for f in to_retry.briefs]
+        stop_notices = [f.notice for f in to_retry.stop_notices]
+
+
+@dataclass(frozen=True)
+class _SubscriptionStep:
+    """One subscription's step of the run: check the guarantor, then build, send, and record the brief for the week.
+
+    When the subscriber is no longer the guarantor, it ends the subscription and sends the stop notice instead.
+    """
 
     source: BookingSource
+    subscriptions: SubscriptionStore
     sent_briefs: SentBriefStore
     mail_sender: MailSender
     clock: Clock
@@ -162,18 +235,22 @@ class _BriefSender:
     heads_up_settings: HeadsUpSettings
     week: Week
 
-    def try_each(self, subscriptions: list[Subscription], outcome: _Outcome) -> list[SendFailure]:
+    def try_each(self, subscriptions: list[Subscription], outcome: _Outcome, to_retry: _ToRetry) -> None:
         """Send each brief. One that fails does not stop the others.
 
-        Adds the briefs that cannot work later to `outcome`, and returns the ones worth another try.
+        Adds the briefs and stop notices that cannot work later to `outcome`, and the ones worth another try to
+        `to_retry`.
         """
-        to_retry = []
         for subscription in subscriptions:
             instrument_name = subscription.instrument_id
             try:
                 instrument = self.source.get_instrument(subscription.instrument_id)
                 instrument_name = instrument.label
-                if not self.send(subscription, instrument):
+                if not is_still_guarantor(subscription, instrument):
+                    self.end(subscription, instrument, outcome, to_retry)
+                elif self.send(subscription, instrument):
+                    outcome.sent += 1
+                else:
                     outcome.sent_by_another_run += 1
             except PERMANENT_ERRORS as error:
                 failure = SendFailure(subscription, instrument_name, str(error))
@@ -182,15 +259,75 @@ class _BriefSender:
             except RETRYABLE_ERRORS as error:
                 failure = SendFailure(subscription, instrument_name, str(error))
                 log.error("Brief for %s failed: %s", failure.describe(), error)
-                to_retry.append(failure)
+                to_retry.briefs.append(failure)
+            except _NotEnded as error:
+                # Tried again: the database may be free later, for example when it was locked.
+                failure = SendFailure(
+                    subscription, instrument_name, f"Could not end the subscription: {error.__cause__}"
+                )
+                log.error(
+                    "Could not end the subscription for %s, so no brief was sent: %s",
+                    failure.describe(),
+                    error.__cause__,
+                )
+                to_retry.briefs.append(failure)
             except _NotRecorded as error:
+                outcome.sent += 1
                 outcome.not_recorded.append(SendFailure(subscription, instrument_name, str(error.__cause__)))
             # An unexpected error, such as a bug on odd data, must not stop the other briefs or the error report.
             except Exception as error:  # Catch-all: for one brief, this loop is the top of the program.
                 failure = SendFailure(subscription, instrument_name, f"{type(error).__name__}: {error}")
                 log.exception("Brief for %s failed with an unexpected error, not trying again", failure.describe())
                 outcome.failed.append(failure)
-        return to_retry
+
+    def end(self, subscription: Subscription, instrument: Instrument, outcome: _Outcome, to_retry: _ToRetry) -> None:
+        """End the subscription and send the stop notice instead of the brief.
+
+        The subscription ends before the stop notice is sent, so one that fails never lets a brief through later.
+        A stop notice that fails is tried again like a brief, unless the mail server refuses the address for good.
+        One that still fails goes into the error report, so the service admin can tell the person.
+        An ended subscription is not active, so no later run checks it or sends the stop notice again.
+
+        Raises _NotEnded when the database could not end the subscription.
+        """
+        try:
+            ended = self.subscriptions.end_because_guarantor_changed(subscription, self.clock())
+        except sqlite3.Error as error:
+            raise _NotEnded from error
+        if not ended:
+            log.info(
+                "Subscription for %s to %s was ended by another run meanwhile", instrument.label, subscription.email
+            )
+            return
+        outcome.subscriptions_ended += 1
+        log.warning(
+            "Subscription for %s to %s ended: the booking system no longer lists this email as the guarantor",
+            instrument.label,
+            subscription.email,
+        )
+        notice = _StopNotice(subscription, instrument.label, stop_notice(subscription, instrument, self.from_address))
+        self.try_stop_notice(notice, outcome, to_retry)
+
+    def try_stop_notice(self, notice: _StopNotice, outcome: _Outcome, to_retry: _ToRetry) -> None:
+        """Send the stop notice. Adds it to `to_retry` when the mail server failed, or to `outcome` when a retry
+        cannot help, such as when the mail server refuses the address for good."""
+        try:
+            self.mail_sender.send(notice.message)
+        except OSError as error:
+            log.error("Cannot send the stop notice for %s: %s", notice.describe(), error)
+            to_retry.stop_notices.append(_FailedStopNotice(notice, str(error)))
+            return
+        except RecipientRefused as error:
+            log.error("Cannot send the stop notice for %s, not trying again: %s", notice.describe(), error)
+            outcome.stop_notices_not_sent.append(notice.failure(str(error)))
+            return
+        # Catch-all, as for the briefs: an unexpected mail error must not stop the other briefs and the error report.
+        # A retry cannot fix it, so it is not tried again.
+        except Exception as error:
+            log.exception("Cannot send the stop notice for %s: unexpected error, not trying again", notice.describe())
+            outcome.stop_notices_not_sent.append(notice.failure(f"{type(error).__name__}: {error}"))
+            return
+        log.info("Sent the stop notice for %s", notice.describe())
 
     def send(self, subscription: Subscription, instrument: Instrument) -> bool:
         """Build, send, and record the brief. False when another run sent it meanwhile, so it was not sent again.
@@ -228,6 +365,13 @@ class _BriefSender:
             )
             raise _NotRecorded from error
         return True
+
+
+class _NotEnded(Exception):
+    """The database could not end the subscription, so no brief and no stop notice went out.
+
+    The cause holds the database error.
+    """
 
 
 class _NotRecorded(Exception):
