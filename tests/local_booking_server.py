@@ -14,8 +14,8 @@ API_KEY = "test-key"
 
 class LocalBookingServer:
     def __init__(
-        self, instruments: dict[str, Any], login_answer: dict[str, Any]
-    ) -> None:  # Any: mirrors the API's JSON.
+        self, instruments: dict[str, Any], login_answer: dict[str, Any]  # Any: mirrors the API's JSON.
+    ) -> None:
         self.instruments = instruments
         self.login_answer = login_answer
         self.logins = 0

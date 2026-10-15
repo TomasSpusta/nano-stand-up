@@ -53,16 +53,19 @@ class FakeBookingApi:
         raise BookingApiError(path, 404, "Not Found")
 
     def _page(
-        self, path: str, items: list[dict[str, Any]], params: Params, time_fields: set[str]
-    ) -> list[dict[str, Any]]:  # Any: JSON.
+        self,
+        path: str,
+        items: list[dict[str, Any]],  # Any: mirrors the API's JSON.
+        params: Params,
+        time_fields: set[str],
+    ) -> list[dict[str, Any]]:  # Any: mirrors the API's JSON.
         limit = int(str(params.get("limit", 20)))
         if limit > MAX_PAGE_SIZE:
             raise BookingApiError(path, 500, "Internal Server Error")
         page = int(str(params.get("page", 1)))
         filters = params.get("filters[]", [])
-        matching = [
-            x for x in items if _matches(x, filters if isinstance(filters, list) else [str(filters)], time_fields)
-        ]
+        filter_list = filters if isinstance(filters, list) else [str(filters)]
+        matching = [x for x in items if _matches(x, filter_list, time_fields)]
         return matching[(page - 1) * limit : page * limit]
 
 
@@ -84,7 +87,11 @@ def _matches(item: dict[str, Any], filters: list[str], time_fields: set[str]) ->
 
 
 def instrument_json(
-    id: str, alias: str, name_en: str | None, name_cz: str, guarantor: dict[str, Any] | None
+    id: str,
+    alias: str,
+    name_en: str | None,
+    name_cz: str,
+    guarantor: dict[str, Any] | None,  # Any: mirrors the API's JSON.
 ) -> dict[str, Any]:  # Any: mirrors the API's JSON.
     return {"id": id, "ge_alias": alias, "ge_nameen": name_en, "name": name_cz, "ge_ownerid": guarantor}
 

@@ -39,10 +39,7 @@ BODY_STYLE = (
 )
 # A table that only lays things out; screen readers skip it.
 LAYOUT_TABLE = 'role="presentation" cellspacing="0" cellpadding="0"'
-OUTLOOK_WRAPPER_START = (
-    '<!--[if mso]><table role="presentation" width="640" align="center" cellspacing="0" cellpadding="0">'
-    "<tr><td><![endif]-->"
-)
+OUTLOOK_WRAPPER_START = f'<!--[if mso]><table {LAYOUT_TABLE} width="640" align="center"><tr><td><![endif]-->'
 OUTLOOK_WRAPPER_END = "<!--[if mso]></td></tr></table><![endif]-->"
 
 
