@@ -83,6 +83,10 @@ class SubscriptionStore:
             for statement in _SCHEMA:
                 db.execute(statement)
 
+    @property
+    def confirm_link_lifetime(self) -> timedelta:
+        return self._confirm_link_lifetime
+
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self._path)
 
