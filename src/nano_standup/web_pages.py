@@ -4,7 +4,7 @@ from datetime import timedelta
 from html import escape
 
 from nano_standup.domain import InstrumentName
-from nano_standup.subscriptions import ConfirmOutcome
+from nano_standup.subscriptions import ConfirmOutcome, UnsubscribeOutcome
 
 STYLE = (
     "body{margin:0;padding:0 1rem;background:#f4f4f5;color:#1a1a1a;line-height:1.5;"
@@ -34,6 +34,23 @@ CONFIRM_MESSAGES = {
     ConfirmOutcome.UNKNOWN: (
         "Link not valid",
         "This confirm link is not valid. Check that you opened the whole link from the email, or subscribe again.",
+    ),
+}
+
+# Each says nothing about other subscriptions: whoever has the link sees only what the brief already showed.
+UNSUBSCRIBE_MESSAGES = {
+    UnsubscribeOutcome.UNSUBSCRIBED: (
+        "Unsubscribed",
+        "You are unsubscribed. No more of these weekly briefs will come. To get them again, subscribe again.",
+    ),
+    UnsubscribeOutcome.ALREADY_UNSUBSCRIBED: (
+        "Already unsubscribed",
+        "This brief was already stopped, so nothing changed. If you subscribed again since,"
+        " use the unsubscribe link in your latest brief.",
+    ),
+    UnsubscribeOutcome.UNKNOWN: (
+        "Link not valid",
+        "This unsubscribe link is not valid. Check that you opened the whole link from the email.",
     ),
 }
 
@@ -85,6 +102,24 @@ def confirm_button_page(token: str) -> str:
 def confirm_page(outcome: ConfirmOutcome) -> str:
     """The message for an outcome of `SubscriptionStore.confirm` or `check`, other than READY."""
     title, text = CONFIRM_MESSAGES[outcome]
+    return _page(title, f"<p>{escape(text)}</p>")
+
+
+def unsubscribe_button_page(token: str) -> str:
+    """Opening the link only shows this page. Mail scanners open links too, so only the button uses the token."""
+    return _page(
+        "Unsubscribe",
+        "<p>Press Unsubscribe to stop getting this weekly brief. Only the brief you got this link in stops.</p>"
+        '<form method="post" action="unsubscribe">'
+        f'<input type="hidden" name="token" value="{escape(token)}">'
+        '<button type="submit">Unsubscribe</button>'
+        "</form>",
+    )
+
+
+def unsubscribe_page(outcome: UnsubscribeOutcome) -> str:
+    """The message for an outcome of `SubscriptionStore.unsubscribe` or `check_unsubscribe`, other than READY."""
+    title, text = UNSUBSCRIBE_MESSAGES[outcome]
     return _page(title, f"<p>{escape(text)}</p>")
 
 
