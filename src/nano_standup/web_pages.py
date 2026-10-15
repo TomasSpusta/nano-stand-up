@@ -7,7 +7,7 @@ from nano_standup.domain import InstrumentName
 from nano_standup.subscriptions import ConfirmOutcome
 
 STYLE = (
-    "body{margin:0;background:#f4f4f5;color:#1a1a1a;line-height:1.5;"
+    "body{margin:0;padding:0 1rem;background:#f4f4f5;color:#1a1a1a;line-height:1.5;"
     "font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}"
     "main{max-width:36rem;margin:2rem auto;padding:1.5rem;background:#fff;border-radius:8px}"
     "h1{font-size:1.4rem;margin-top:0}"
